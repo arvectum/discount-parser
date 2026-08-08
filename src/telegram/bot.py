@@ -23,8 +23,7 @@ router = Router(name="discount-parser-admin")
 
 def _is_admin(user_id: int | None) -> bool:
     settings = get_settings()
-    admins = settings.telegram_admin_id_set
-    return user_id is not None and user_id in admins
+    return user_id is not None and user_id in settings.telegram_admin_id_set
 
 
 async def _deny_if_needed(event: Message | CallbackQuery) -> bool:
@@ -88,6 +87,10 @@ def _queue(limit: int | None = None) -> list[Offer]:
         return list_publish_candidates(session, channel_id=settings.telegram_channel_id, criteria=criteria)
 
 
+def _callback_safe(prefix: str, value: str) -> bool:
+    return len(f"{prefix}:{value}".encode("utf-8")) <= 64
+
+
 def _filter_categories() -> list[str]:
     with create_session() as session:
         values = session.scalars(
@@ -97,10 +100,28 @@ def _filter_categories() -> list[str]:
             .order_by(Offer.category)
             .limit(8)
         ).all()
-    return [value for value in values if value and len(f"filter_cat:{value}".encode("utf-8")) <= 64]
+    return [value for value in values if value and _callback_safe("filter_cat", value)]
 
 
-def _filter_keyboard() -> InlineKeyboardMarkup:
+def _filter_subcategories(category: str | None) -> list[str]:
+    if not category:
+        return []
+    with create_session() as session:
+        values = session.scalars(
+            select(Offer.subcategory)
+            .where(
+                Offer.category == category,
+                Offer.subcategory.is_not(None),
+                Offer.subcategory != "",
+            )
+            .distinct()
+            .order_by(Offer.subcategory)
+            .limit(8)
+        ).all()
+    return [value for value in values if value and _callback_safe("filter_subcat", value)]
+
+
+def _filter_keyboard(category: str | None = None) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(text="10%", callback_data="filter_min:10"),
@@ -123,10 +144,22 @@ def _filter_keyboard() -> InlineKeyboardMarkup:
     for index in range(0, len(categories), 2):
         rows.append(
             [
-                InlineKeyboardButton(text=category, callback_data=f"filter_cat:{category}")
-                for category in categories[index : index + 2]
+                InlineKeyboardButton(text=value, callback_data=f"filter_cat:{value}")
+                for value in categories[index : index + 2]
             ]
         )
+
+    if category:
+        rows.append([InlineKeyboardButton(text="Все подкатегории", callback_data="filter_subcat:all")])
+        subcategories = _filter_subcategories(category)
+        for index in range(0, len(subcategories), 2):
+            rows.append(
+                [
+                    InlineKeyboardButton(text=value, callback_data=f"filter_subcat:{value}")
+                    for value in subcategories[index : index + 2]
+                ]
+            )
+
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -224,8 +257,9 @@ async def filter_command(message: Message) -> None:
         "Фильтр публикации\n"
         f"Минимальная скидка: {row.min_discount_percent or 0}%\n"
         f"Категория: {row.category or 'все'}\n"
+        f"Подкатегория: {row.subcategory or 'все'}\n"
         f"Тип: {row.offer_type or 'все'}",
-        reply_markup=_filter_keyboard(),
+        reply_markup=_filter_keyboard(row.category),
     )
 
 
@@ -235,9 +269,10 @@ async def filter_min_callback(callback: CallbackQuery) -> None:
         return
     value = Decimal(callback.data.split(":", 1)[1])
     update_default_filter(min_discount_percent=value)
+    row = get_or_create_default_filter()
     await callback.answer(f"Фильтр: от {value:g}%")
     if callback.message:
-        await callback.message.edit_text(f"Минимальная скидка: {value:g}%", reply_markup=_filter_keyboard())
+        await callback.message.edit_text(f"Минимальная скидка: {value:g}%", reply_markup=_filter_keyboard(row.category))
 
 
 @router.callback_query(F.data.startswith("filter_type:"))
@@ -246,11 +281,12 @@ async def filter_type_callback(callback: CallbackQuery) -> None:
         return
     value = callback.data.split(":", 1)[1]
     update_default_filter(offer_type=None if value == "all" else value)
+    row = get_or_create_default_filter()
     await callback.answer("Тип обновлён")
     if callback.message:
         await callback.message.edit_text(
             f"Тип предложения: {'все' if value == 'all' else value}",
-            reply_markup=_filter_keyboard(),
+            reply_markup=_filter_keyboard(row.category),
         )
 
 
@@ -259,12 +295,28 @@ async def filter_category_callback(callback: CallbackQuery) -> None:
     if await _deny_if_needed(callback):
         return
     value = callback.data.split(":", 1)[1]
-    update_default_filter(category=None if value == "all" else value, subcategory=None)
+    category = None if value == "all" else value
+    update_default_filter(category=category, subcategory=None)
     await callback.answer("Категория обновлена")
     if callback.message:
         await callback.message.edit_text(
-            f"Категория: {'все' if value == 'all' else value}",
-            reply_markup=_filter_keyboard(),
+            f"Категория: {'все' if category is None else category}",
+            reply_markup=_filter_keyboard(category),
+        )
+
+
+@router.callback_query(F.data.startswith("filter_subcat:"))
+async def filter_subcategory_callback(callback: CallbackQuery) -> None:
+    if await _deny_if_needed(callback):
+        return
+    value = callback.data.split(":", 1)[1]
+    subcategory = None if value == "all" else value
+    row = update_default_filter(subcategory=subcategory)
+    await callback.answer("Подкатегория обновлена")
+    if callback.message:
+        await callback.message.edit_text(
+            f"Подкатегория: {'все' if subcategory is None else subcategory}",
+            reply_markup=_filter_keyboard(row.category),
         )
 
 
