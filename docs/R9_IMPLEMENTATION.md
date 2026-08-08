@@ -1,22 +1,28 @@
 # R9 — QA, demo, packaging, delivery
 
-Статус: **IN PROGRESS — automated QA foundation implemented; external live smoke pending**  
+Статус: **FINAL AUTOMATED QA GATE — live external smoke remains credential-dependent**  
 Дата: **2026-08-08**
 
-## Automated QA foundation
+## Automated QA gate
 
-GitHub Actions CI выполняет:
+GitHub Actions CI выполняет на Python 3.11:
 
 ```text
 clean checkout
-→ Python 3.11
-→ pip install -e .[dev]
+→ dependency install
 → compileall src/tests
-→ pytest
+→ full pytest
 → Alembic upgrade from empty SQLite
 → database connectivity smoke
 → CLI entrypoint smoke
 ```
+
+Обычный test matrix:
+
+- Ubuntu x64;
+- Windows x64;
+- macOS ARM64;
+- macOS Intel.
 
 Проверяются CLI-команды:
 
@@ -24,7 +30,40 @@ clean checkout
 - `parse --help`;
 - `maintenance --help`;
 - `scheduler --help`;
-- `bot --help`.
+- `bot --help`;
+- `run --help`;
+- `web --help`;
+- `smoke-report --help`.
+
+## Delivery build gate
+
+`build-delivery` отдельно собирает frozen packages:
+
+- Windows x64 — PyInstaller + `DiscountParser-Setup.exe`;
+- macOS ARM64 — frozen application + installer launcher;
+- macOS Intel — frozen application + installer launcher.
+
+Для каждой frozen-сборки выполняется migration smoke через уже собранный executable.
+
+Windows installer создаёт локальную установку и ярлык. macOS update installer сохраняет пользовательские `.env` и `discount_parser.db`.
+
+## Web client surface
+
+Клиентская web-панель включает:
+
+- first-run Telegram setup wizard;
+- parser / bot / scheduler controls;
+- persisted source enable/disable;
+- schedule settings;
+- publication filter and queue;
+- manual publish/reject;
+- XLSX export/import;
+- offers browser with filters/search/detail page;
+- ParseRun journal and error details.
+
+## Publication safety
+
+Publication ledger обеспечивает conservative at-most-once semantics. Reservation создаётся до Telegram network call со schema-valid статусом `pending`, затем переводится в `published` или `failed`.
 
 ## Delivery evidence
 
@@ -49,9 +88,7 @@ JSON report включает:
 - latest Telegram message id;
 - latest status/last success/last error/counters каждого source.
 
-`tests/test_qa_report.py` проверяет формирование и запись delivery evidence.
-
-## Уже покрытые regression suites
+## Regression coverage
 
 - R1 app/settings/health/logging;
 - R2 persistence/migration/WAL/manual override/publication uniqueness;
@@ -60,19 +97,18 @@ JSON report включает:
 - R6 lifecycle + scheduler;
 - R7 publication selection/rendering/idempotency/non-ready protection;
 - R8 XLSX export/import/rule-memory roundtrip;
-- R9 smoke-report generation.
+- web setup, schedule, source state and management pages;
+- R9 smoke-report generation and cross-platform delivery build configuration.
 
-## Что ещё требуется для полного MVP DONE
+## External live acceptance gate
 
-Эти проверки зависят от реальной runtime-среды и внешних credentials:
+Следующие проверки невозможно достоверно выполнить без реальных runtime credentials и сетевого окружения заказчика:
 
-1. clean dependency install в CI/целевой машине;
-2. полный `python -m pytest` с актуальными dependencies;
-3. live smoke всех 5 источников в текущем интернете;
-4. реальный Telegram bot polling startup;
-5. реальный channel publication;
-6. подтверждение сохранённого `telegram_message_id`;
-7. live scheduler restart/recovery smoke;
-8. финальный `output/smoke_report.json` после live прогона.
+1. live HTTP parse всех включённых источников;
+2. реальный Telegram bot polling startup;
+3. реальная публикация в тестовый Telegram-канал;
+4. подтверждение сохранённого `telegram_message_id`;
+5. live scheduler/autopost smoke;
+6. финальный smoke report после live прогона.
 
-До выполнения этих пунктов R9 и общий MVP не помечаются как полностью DONE.
+Автоматизированный кодовый/delivery gate и внешний live acceptance считаются разными воротами. R9 можно помечать `CODE/DISTRIBUTION DONE` только после зелёных CI + delivery jobs; полный production acceptance — после внешнего live smoke.
