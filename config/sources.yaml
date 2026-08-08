@@ -1,0 +1,6 @@
+sources:
+  - key: promokood
+    name: PROMOKO/OD
+    adapter: promokood
+    base_url: https://promokood.ru/
+    enabled: true
