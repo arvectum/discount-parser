@@ -1,18 +1,27 @@
 from __future__ import annotations
 
+import asyncio
 import html
+import tempfile
 import threading
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from aiogram import Bot
+from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 
 from src.jobs.status import get_source_run_statuses
 from src.modules.offers.models import Offer
+from src.modules.publishing.filters import get_or_create_default_filter, update_default_filter
+from src.modules.publishing.service import PublishCriteria, list_publish_candidates
+from src.modules.xlsx.service import export_offers_xlsx, import_offer_corrections
 from src.shared.config import get_settings
 from src.shared.db import create_session
 from src.sources.runner import run_all
+from src.telegram.publisher import publish_offer
 from src.web.processes import process_manager
 from src.web.setup import is_setup_complete, save_telegram_setup
 
@@ -23,7 +32,7 @@ _parse_state = {'running': False, 'last_error': None, 'last_finished': None}
 STYLE = '''
 <style>
 :root{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#18212f;background:#f5f7fb}
-*{box-sizing:border-box}body{margin:0}.wrap{max-width:1180px;margin:auto;padding:32px}.top{display:flex;justify-content:space-between;align-items:center;gap:16px}.brand h1{margin:0;font-size:28px}.muted{color:#64748b}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:24px 0}.card{background:white;border:1px solid #e5e7eb;border-radius:16px;padding:18px;box-shadow:0 6px 20px rgba(15,23,42,.05)}.metric{font-size:28px;font-weight:700;margin-top:5px}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.btn{display:inline-block;border:0;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer;text-decoration:none;background:#111827;color:white}.btn.secondary{background:#e5e7eb;color:#111827}.btn.good{background:#0f766e}.btn.bad{background:#b91c1c}.pill{display:inline-block;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700}.on{background:#dcfce7;color:#166534}.off{background:#fee2e2;color:#991b1b}.section{margin-top:20px}.source{display:grid;grid-template-columns:1.4fr .7fr .7fr 1fr;gap:10px;padding:10px 0;border-bottom:1px solid #eef2f7}.setup{max-width:680px;margin:50px auto;background:white;padding:30px;border-radius:18px;border:1px solid #e5e7eb}.field{margin:16px 0}.field label{display:block;font-weight:650;margin-bottom:6px}.field input{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px}.error{background:#fee2e2;color:#991b1b;padding:12px;border-radius:10px}.ok{background:#dcfce7;color:#166534;padding:12px;border-radius:10px}@media(max-width:700px){.source{grid-template-columns:1fr 1fr}.wrap{padding:18px}}
+*{box-sizing:border-box}body{margin:0}.wrap{max-width:1240px;margin:auto;padding:32px}.top{display:flex;justify-content:space-between;align-items:center;gap:16px}.brand h1{margin:0;font-size:28px}.muted{color:#64748b}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:24px 0}.card{background:white;border:1px solid #e5e7eb;border-radius:16px;padding:18px;box-shadow:0 6px 20px rgba(15,23,42,.05)}.metric{font-size:28px;font-weight:700;margin-top:5px}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.btn{display:inline-block;border:0;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer;text-decoration:none;background:#111827;color:white}.btn.secondary{background:#e5e7eb;color:#111827}.btn.good{background:#0f766e}.btn.bad{background:#b91c1c}.btn.warn{background:#b45309}.btn:disabled{opacity:.45;cursor:not-allowed}.pill{display:inline-block;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700}.on{background:#dcfce7;color:#166534}.off{background:#fee2e2;color:#991b1b}.section{margin-top:20px}.source{display:grid;grid-template-columns:1.4fr .7fr .7fr 1fr;gap:10px;padding:10px 0;border-bottom:1px solid #eef2f7}.setup{max-width:680px;margin:50px auto;background:white;padding:30px;border-radius:18px;border:1px solid #e5e7eb}.field{margin:16px 0}.field label{display:block;font-weight:650;margin-bottom:6px}.field input,.field select{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;background:white}.error{background:#fee2e2;color:#991b1b;padding:12px;border-radius:10px}.ok{background:#dcfce7;color:#166534;padding:12px;border-radius:10px}.queue{display:grid;gap:12px}.offer{border:1px solid #e5e7eb;border-radius:12px;padding:14px}.offer h4{margin:0 0 8px}.offer-meta{display:flex;gap:10px;flex-wrap:wrap;font-size:13px;color:#64748b}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.tabs a{padding:8px 12px;border-radius:8px;background:#eef2f7;color:#334155;text-decoration:none;font-weight:650}.filter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.filter-grid .field{margin:0}.small{font-size:13px}.flash{margin:18px 0}@media(max-width:700px){.source{grid-template-columns:1fr 1fr}.wrap{padding:18px}.top{align-items:flex-start;flex-direction:column}}
 </style>
 '''
 
@@ -41,6 +50,12 @@ def _metrics() -> dict[str, int]:
         return result
 
 
+def _distinct_offer_values(field) -> list[str]:
+    with create_session() as session:
+        values = session.scalars(select(field).where(field.is_not(None), field != '').distinct().order_by(field).limit(100)).all()
+    return [str(value) for value in values if value]
+
+
 def _run_parse_thread() -> None:
     if not _parse_lock.acquire(blocking=False):
         return
@@ -56,8 +71,69 @@ def _run_parse_thread() -> None:
         _parse_lock.release()
 
 
+def _filter_form() -> str:
+    settings = get_settings()
+    row = get_or_create_default_filter(min_discount_percent=settings.telegram_default_min_discount)
+    categories = _distinct_offer_values(Offer.category)
+    subcategories = _distinct_offer_values(Offer.subcategory)
+    merchants = _distinct_offer_values(Offer.merchant)
+
+    def options(values: list[str], current: str | None, all_label: str) -> str:
+        result = [f'<option value="">{html.escape(all_label)}</option>']
+        for value in values:
+            selected = ' selected' if value == current else ''
+            result.append(f'<option value="{html.escape(value)}"{selected}>{html.escape(value)}</option>')
+        return ''.join(result)
+
+    enabled = ' checked' if row.enabled else ''
+    return f'''<form method="post" action="/filter">
+      <div class="filter-grid">
+        <div class="field"><label>Минимальная скидка, %</label><input name="min_discount_percent" value="{row.min_discount_percent or 0}" inputmode="decimal"></div>
+        <div class="field"><label>Категория</label><select name="category">{options(categories,row.category,'Все категории')}</select></div>
+        <div class="field"><label>Подкатегория</label><select name="subcategory">{options(subcategories,row.subcategory,'Все подкатегории')}</select></div>
+        <div class="field"><label>Тип</label><select name="offer_type"><option value="">Все типы</option>{''.join(f'<option value="{kind}"{" selected" if row.offer_type == kind else ""}>{kind}</option>' for kind in ('discount','promo','cashback','delivery','other'))}</select></div>
+        <div class="field"><label>Магазин</label><select name="merchant">{options(merchants,row.merchant,'Все магазины')}</select></div>
+        <div class="field"><label>Постов за цикл</label><input type="number" min="1" max="100" name="max_posts_per_cycle" value="{row.max_posts_per_cycle or 10}"></div>
+      </div>
+      <div class="row" style="margin-top:14px"><label><input type="checkbox" name="enabled" value="1"{enabled}> Автопостинг включён</label><button class="btn good" type="submit">Сохранить фильтр</button></div>
+    </form>'''
+
+
+def _queue_html() -> str:
+    settings = get_settings()
+    if not settings.telegram_channel_id:
+        return '<p class="muted">Канал Telegram пока не настроен.</p>'
+    row = get_or_create_default_filter(min_discount_percent=settings.telegram_default_min_discount)
+    criteria = PublishCriteria.from_filter(row)
+    criteria = PublishCriteria(
+        min_discount_percent=criteria.min_discount_percent,
+        category=criteria.category,
+        subcategory=criteria.subcategory,
+        offer_type=criteria.offer_type,
+        merchant=criteria.merchant,
+        source_key=criteria.source_key,
+        limit=min(max(criteria.limit, 1), 20),
+    )
+    with create_session() as session:
+        offers = list_publish_candidates(session, channel_id=settings.telegram_channel_id, criteria=criteria)
+    if not offers:
+        return '<p class="muted">По текущему фильтру очередь пуста.</p>'
+    chunks: list[str] = []
+    for offer in offers:
+        benefit = []
+        if offer.discount_percent is not None:
+            benefit.append(f'{offer.discount_percent:g}%')
+        if offer.discount_amount is not None:
+            benefit.append(f'−{offer.discount_amount:g} {html.escape(offer.currency or "₽")}')
+        if offer.promo_code:
+            benefit.append(f'код {html.escape(offer.promo_code)}')
+        link = f'<a class="btn secondary" target="_blank" rel="noopener" href="{html.escape(offer.canonical_url)}">Открыть</a>' if offer.canonical_url and offer.canonical_url.startswith(('http://','https://')) else ''
+        chunks.append(f'''<div class="offer"><h4>{html.escape(offer.display_title or offer.title)}</h4><div class="offer-meta"><span>{html.escape(offer.merchant or '—')}</span><span>{html.escape(offer.category or 'Без категории')}</span><span>{html.escape(offer.offer_type or 'other')}</span><span>{' · '.join(benefit) or 'выгода не указана'}</span></div><div class="row" style="margin-top:12px"><form method="post" action="/publish/{offer.id}"><button class="btn good">Опубликовать</button></form><form method="post" action="/reject/{offer.id}"><button class="btn bad">Отклонить</button></form>{link}</div></div>''')
+    return '<div class="queue">' + ''.join(chunks) + '</div>'
+
+
 @app.get('/', response_class=HTMLResponse)
-def dashboard(request: Request):
+def dashboard(request: Request, message: str | None = None):
     if not is_setup_complete():
         return RedirectResponse('/setup', status_code=303)
 
@@ -81,9 +157,11 @@ def dashboard(request: Request):
 
     parse_status = '<span class="pill on">ИДЁТ СБОР</span>' if _parse_state['running'] else '<span class="pill off">НЕ ЗАПУЩЕН</span>'
     parse_error = f'<div class="error" style="margin-top:10px">{html.escape(str(_parse_state["last_error"]))}</div>' if _parse_state['last_error'] else ''
+    flash = f'<div class="ok flash">{html.escape(message)}</div>' if message else ''
 
     body = f'''<div class="wrap">
-    <div class="top"><div class="brand"><h1>Discount Parser</h1><div class="muted">Панель управления парсером и Telegram-ботом</div></div><a class="btn secondary" href="/setup">Настройки</a></div>
+    <div class="top"><div class="brand"><h1>Discount Parser</h1><div class="muted">Панель управления парсером и Telegram-ботом</div></div><div class="row"><a class="btn secondary" href="/export">Скачать XLSX</a><a class="btn secondary" href="/setup">Настройки</a></div></div>
+    {flash}
     <div class="grid">
       <div class="card"><div class="muted">Всего предложений</div><div class="metric">{metrics['total']}</div></div>
       <div class="card"><div class="muted">Готово</div><div class="metric">{metrics['ready']}</div></div>
@@ -95,6 +173,9 @@ def dashboard(request: Request):
       <div class="card"><b>Парсер</b><div style="margin:12px 0">{parse_status}</div><form method="post" action="/parse"><button class="btn good" {'disabled' if _parse_state['running'] else ''}>Запустить сбор сейчас</button></form><div class="muted" style="margin-top:8px">Последний запуск: {html.escape(str(_parse_state['last_finished'] or '—'))}</div>{parse_error}</div>
     </div>
     <div class="card section"><div class="row" style="justify-content:space-between"><div><b>Telegram</b><div class="muted">{html.escape(settings.telegram_bot_name or 'Бот')} → {html.escape(settings.telegram_channel_id or '')}</div></div><a class="btn secondary" href="/setup">Изменить</a></div></div>
+    <div class="card section"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">Фильтр публикации</h3><div class="muted small">Одинаковый для веб-панели, Telegram `/queue` и автопостинга.</div></div></div><div style="margin-top:16px">{_filter_form()}</div></div>
+    <div class="card section"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">Очередь публикации</h3><div class="muted small">До 20 следующих предложений по текущему фильтру.</div></div></div><div style="margin-top:16px">{_queue_html()}</div></div>
+    <div class="card section"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">XLSX-коррекция</h3><div class="muted small">Скачайте файл, меняйте только category/subcategory и загрузите обратно.</div></div><a class="btn secondary" href="/export">Экспорт</a></div><form method="post" action="/import" enctype="multipart/form-data" class="row" style="margin-top:14px"><input type="file" name="file" accept=".xlsx" required><button class="btn good">Импортировать XLSX</button></form></div>
     <div class="card section"><h3>Источники</h3><div class="source"><b>Источник</b><b>Статус</b><b>Получено</b><b>Последний запуск</b></div>{source_rows}</div>
     </div>'''
     return HTMLResponse(_layout('Discount Parser', body))
@@ -111,6 +192,7 @@ def setup_page(error: str | None = None):
       <div class="field"><label>Telegram-канал *</label><input name="channel_id" value="{html.escape(settings.telegram_channel_id or '')}" placeholder="@my_channel или -100..." required><div class="muted">Бот должен быть администратором канала с правом публикации.</div></div>
       <div class="field"><label>Ваш Telegram user ID *</label><input name="admin_ids" value="{html.escape(settings.telegram_admin_ids or '')}" placeholder="123456789" required><div class="muted">Этот пользователь сможет управлять ботом. Несколько ID — через запятую.</div></div>
       <button class="btn good" type="submit">Сохранить и открыть панель</button>
+      {'<a class="btn secondary" href="/" style="margin-left:8px">Назад</a>' if is_setup_complete() else ''}
     </form></div>'''
     return HTMLResponse(_layout('Настройка Discount Parser', body))
 
@@ -126,27 +208,110 @@ def setup_save(
         save_telegram_setup(bot_token=bot_token, bot_name=bot_name, channel_id=channel_id, admin_ids=admin_ids)
     except ValueError as exc:
         return setup_page(error=str(exc))
-    return RedirectResponse('/', status_code=303)
+    return RedirectResponse('/?message=Настройки+сохранены', status_code=303)
+
+
+@app.post('/filter')
+def save_filter(
+    min_discount_percent: str = Form('0'),
+    category: str = Form(''),
+    subcategory: str = Form(''),
+    offer_type: str = Form(''),
+    merchant: str = Form(''),
+    max_posts_per_cycle: int = Form(10),
+    enabled: str | None = Form(None),
+):
+    try:
+        minimum = Decimal(min_discount_percent.replace(',', '.'))
+    except InvalidOperation:
+        minimum = Decimal('0')
+    update_default_filter(
+        enabled=bool(enabled),
+        min_discount_percent=max(Decimal('0'), minimum),
+        category=category.strip() or None,
+        subcategory=subcategory.strip() or None,
+        offer_type=offer_type.strip() or None,
+        merchant=merchant.strip() or None,
+        max_posts_per_cycle=max(1, min(int(max_posts_per_cycle), 100)),
+    )
+    return RedirectResponse('/?message=Фильтр+сохранён', status_code=303)
 
 
 @app.post('/parse')
 def start_parse():
     if not _parse_state['running']:
         threading.Thread(target=_run_parse_thread, daemon=True).start()
-    return RedirectResponse('/', status_code=303)
+    return RedirectResponse('/?message=Парсинг+запущен', status_code=303)
 
 
 @app.post('/process/{name}/{action}')
 def process_action(name: str, action: str):
     if not is_setup_complete():
         return RedirectResponse('/setup', status_code=303)
-    if action == 'start':
-        process_manager.start(name)
-    elif action == 'stop':
-        process_manager.stop(name)
-    else:
-        return HTMLResponse('Unsupported action', status_code=400)
-    return RedirectResponse('/', status_code=303)
+    try:
+        if action == 'start':
+            process_manager.start(name)
+        elif action == 'stop':
+            process_manager.stop(name)
+        else:
+            return HTMLResponse('Unsupported action', status_code=400)
+    except ValueError as exc:
+        return HTMLResponse(html.escape(str(exc)), status_code=400)
+    return RedirectResponse(f'/?message={name}+{action}', status_code=303)
+
+
+@app.post('/publish/{offer_id}')
+def web_publish(offer_id: int):
+    settings = get_settings()
+    if not settings.telegram_bot_token or not settings.telegram_channel_id:
+        return RedirectResponse('/setup', status_code=303)
+
+    async def _publish():
+        bot = Bot(token=settings.telegram_bot_token)
+        try:
+            return await publish_offer(bot, offer_id=offer_id, channel_id=settings.telegram_channel_id)
+        finally:
+            await bot.session.close()
+
+    result = asyncio.run(_publish())
+    return RedirectResponse(f'/?message=Публикация:+{result.status}', status_code=303)
+
+
+@app.post('/reject/{offer_id}')
+def web_reject(offer_id: int):
+    with create_session() as session:
+        offer = session.get(Offer, offer_id)
+        if offer is not None and offer.status in {'new', 'ready', 'needs_review'}:
+            offer.status = 'rejected'
+            session.commit()
+    return RedirectResponse('/?message=Предложение+отклонено', status_code=303)
+
+
+@app.get('/export')
+def web_export():
+    tmp_dir = Path(tempfile.mkdtemp(prefix='discount_parser_export_'))
+    path = export_offers_xlsx(tmp_dir / 'offers.xlsx')
+    return FileResponse(path, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', filename='offers.xlsx')
+
+
+@app.post('/import')
+async def web_import(file: UploadFile = File(...)):
+    filename = (file.filename or '').lower()
+    if not filename.endswith('.xlsx'):
+        return RedirectResponse('/?message=Нужен+файл+.xlsx', status_code=303)
+    if file.size is not None and file.size > 20 * 1024 * 1024:
+        return RedirectResponse('/?message=Файл+слишком+большой', status_code=303)
+    with tempfile.NamedTemporaryFile(prefix='discount_parser_import_', suffix='.xlsx', delete=False) as handle:
+        path = Path(handle.name)
+        handle.write(await file.read())
+    try:
+        report = import_offer_corrections(path)
+    except Exception as exc:
+        return RedirectResponse(f'/?message=Ошибка+импорта:+{type(exc).__name__}', status_code=303)
+    finally:
+        path.unlink(missing_ok=True)
+    message = f'Импорт: изменено {report.rows_changed}, overrides {report.overrides_written}, правил {report.rules_created}, ошибок {len(report.errors)}'
+    return RedirectResponse('/?message=' + message.replace(' ', '+'), status_code=303)
 
 
 @app.on_event('shutdown')
