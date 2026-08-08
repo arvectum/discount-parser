@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     timezone: str = "Europe/Moscow"
     database_url: str = "sqlite:///./discount_parser.db"
 
+    sources_config_path: str = "config/sources.yaml"
+    collect_interval_minutes: int = 120
+    maintenance_hour: int = 22
+    maintenance_minute: int = 0
+    stale_after_days: int = 7
+
 
 @lru_cache
 def get_settings() -> Settings:
