@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from src.shared.config import get_settings
-from src.web import setup as setup_module
+from src.web import setup as setup_utils
 
 
 @pytest.fixture
@@ -20,15 +20,15 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         'DP_STALE_AFTER_DAYS=7\n',
         encoding='utf-8',
     )
-    monkeypatch.setattr(setup_module, 'ENV_PATH', env_path)
-    monkeypatch.setattr(setup_module, 'ENV_EXAMPLE_PATH', example_path)
+    monkeypatch.setattr(setup_utils, 'ENV_PATH', env_path)
+    monkeypatch.setattr(setup_utils, 'ENV_EXAMPLE_PATH', example_path)
     get_settings.cache_clear()
     yield env_path
     get_settings.cache_clear()
 
 
 def test_operational_settings_are_written_to_env(isolated_env: Path) -> None:
-    setup_module.save_operational_settings(
+    setup_utils.save_operational_settings(
         collect_interval_minutes=45,
         autopost_interval_minutes=15,
         maintenance_hour=3,
@@ -46,7 +46,7 @@ def test_operational_settings_are_written_to_env(isolated_env: Path) -> None:
 
 def test_operational_settings_validate_ranges(isolated_env: Path) -> None:
     with pytest.raises(ValueError, match='Интервал сбора'):
-        setup_module.save_operational_settings(
+        setup_utils.save_operational_settings(
             collect_interval_minutes=0,
             autopost_interval_minutes=15,
             maintenance_hour=3,

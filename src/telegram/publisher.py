@@ -27,8 +27,6 @@ def _reserve_publication(offer_id: int, channel_id: str) -> tuple[Offer | None, 
         offer = session.get(Offer, offer_id)
         if offer is None:
             return None, None, "offer_not_found"
-        if offer.status != "ready":
-            return offer, None, f"offer_not_publishable:{offer.status}"
 
         existing = (
             session.query(Publication)
@@ -37,6 +35,8 @@ def _reserve_publication(offer_id: int, channel_id: str) -> tuple[Offer | None, 
         )
         if existing is not None:
             return offer, existing, "already_reserved"
+        if offer.status != "ready":
+            return offer, None, f"offer_not_publishable:{offer.status}"
 
         # "pending" is the durable reservation state defined by the schema.
         # Creating the row before the Telegram network call preserves the

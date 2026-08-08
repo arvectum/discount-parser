@@ -29,7 +29,9 @@ chmod +x delivery/install.command delivery/app/DiscountParser
 (
   cd delivery/app
   ./DiscountParser migrate
-  ./DiscountParser doctor
+  # Validate frozen runtime without coupling the build to an unrelated local
+  # service that may already use the default control-panel port.
+  DP_WEB_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')" ./DiscountParser doctor
 )
 
 echo "LOCAL MACOS DELIVERY BUILD: PASSED"

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.core.normalization import normalize_text
+from src.shared.config import project_path
 from src.modules.offers.models import ClassificationRule, Offer
 
 
@@ -31,7 +32,7 @@ def classify_offer(
     merchant: str | None,
     brand: str | None = None,
     offer: Offer | None = None,
-    taxonomy_path: str | Path = "config/taxonomy.yaml",
+    taxonomy_path: str | Path | None = None,
 ) -> Classification:
     protected = _manual_fields(offer)
     if offer is not None and "category" in protected and offer.category:
@@ -58,7 +59,8 @@ def classify_offer(
             if match_value in target:
                 return Classification(rule.category, rule.subcategory, f"rule:{rule.id}")
 
-    data = yaml.safe_load(Path(taxonomy_path).read_text(encoding="utf-8")) or {}
+    taxonomy_file = Path(taxonomy_path) if taxonomy_path is not None else project_path("config", "taxonomy.yaml")
+    data = yaml.safe_load(taxonomy_file.read_text(encoding="utf-8")) or {}
     for category in data.get("categories", []):
         name = str(category["name"])
         for keyword in category.get("keywords", []):

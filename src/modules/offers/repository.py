@@ -54,5 +54,4 @@ class OfferRepository:
     def create_publication(self, offer: Offer, channel_id: str, **values) -> Publication:
         publication = Publication(offer_id=offer.id, channel_id=channel_id, **values)
         self.session.add(publication)
-        self.session.flush()
         return publication

@@ -1,6 +1,14 @@
 from functools import lru_cache
+from pathlib import Path
+import sys
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def project_path(*parts: str) -> Path:
+    """Return a bundled asset path without depending on the working directory."""
+    root = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[2]
+    return root.joinpath(*parts)
 
 
 class Settings(BaseSettings):
@@ -22,7 +30,7 @@ class Settings(BaseSettings):
     timezone: str = "Europe/Moscow"
     database_url: str = "sqlite:///./discount_parser.db"
 
-    sources_config_path: str = "config/sources.yaml"
+    sources_config_path: str = str(project_path("config", "sources.yaml"))
     collect_interval_minutes: int = 120
     maintenance_hour: int = 22
     maintenance_minute: int = 0

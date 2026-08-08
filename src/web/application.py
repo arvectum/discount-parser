@@ -14,8 +14,11 @@ from src.web.processes import process_manager
 from src.web.setup import is_setup_complete
 from src.web.system_routes import router as system_router
 
-app.include_router(management_router)
-app.include_router(system_router)
+# FastAPI 0.141 retains included routers as wrapper objects in ``app.routes``.
+# These routers are standalone and need no prefix/dependencies, so registering
+# their concrete routes keeps route introspection and older tooling compatible.
+app.router.routes.extend(management_router.routes)
+app.router.routes.extend(system_router.routes)
 
 _LOCAL_HOSTS = {'127.0.0.1', 'localhost', '::1'}
 _MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
