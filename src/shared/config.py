@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: str = "plain"
     timezone: str = "Europe/Moscow"
+    database_url: str = "sqlite:///./discount_parser.db"
 
 
 @lru_cache
