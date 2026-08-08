@@ -27,6 +27,21 @@ class Settings(BaseSettings):
     maintenance_minute: int = 0
     stale_after_days: int = 7
 
+    telegram_bot_token: str | None = None
+    telegram_channel_id: str | None = None
+    telegram_admin_ids: str = ""
+    telegram_default_min_discount: int = 20
+    autopost_interval_minutes: int = 30
+
+    @property
+    def telegram_admin_id_set(self) -> set[int]:
+        result: set[int] = set()
+        for item in self.telegram_admin_ids.split(","):
+            item = item.strip()
+            if item:
+                result.add(int(item))
+        return result
+
 
 @lru_cache
 def get_settings() -> Settings:
