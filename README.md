@@ -4,9 +4,9 @@
 
 ## Статус
 
-**MVP v1.0 — R5 Source pack MVP завершён.**
+**MVP v1.0 — R6 завершён, R7 реализован; live Telegram smoke ожидает реальные credentials.**
 
-Следующий этап: **R6 — offer lifecycle + scheduler**.
+Следующий независимый этап: **R8 — XLSX correction loop + rule memory**.
 
 ## Документация
 
@@ -17,10 +17,13 @@
 - [R3 implementation](docs/R3_IMPLEMENTATION.md)
 - [R4 implementation](docs/R4_IMPLEMENTATION.md)
 - [R5 implementation](docs/R5_IMPLEMENTATION.md)
+- [R6 implementation](docs/R6_IMPLEMENTATION.md)
+- [R7 implementation](docs/R7_IMPLEMENTATION.md)
 
 ## Реализовано
 
-- FastAPI application factory, конфигурация `DP_*`, logging, `/health`, `/health/db`;
+- FastAPI application factory, конфигурация `DP_*`, logging;
+- `/health`, `/health/db`, `/health/sources`;
 - SQLAlchemy 2.x + SQLite WAL + Alembic `0001`;
 - Offer/Source/provenance/ParseRun/rules/overrides/publications/filters;
 - normalization: canonical URL, benefit values, fingerprint, offer type;
@@ -34,8 +37,17 @@
   - `promokodi_net_ru` — promokodi.net.ru;
   - `promko` — promko.net;
 - повторный parsing run обновляет Offer/observation вместо создания exact duplicate;
-- CLI для запуска одного или всех источников;
-- deterministic HTML fixtures/tests и GitHub Actions CI.
+- APScheduler: collection + maintenance + autopost;
+- lifecycle: explicit expiry и conservative stale review;
+- Telegram control bot на aiogram 3;
+- admin allowlist;
+- `/status`, `/sources`, `/new`, `/queue`, `/filter`, `/autopost`;
+- filter по скидке/category/subcategory/type, service-level merchant/source filters;
+- preview + publish/skip/reject;
+- image → text fallback;
+- publication ledger с `telegram_message_id` и защитой от дублей;
+- CLI parse/maintenance/scheduler/bot;
+- deterministic fixtures/tests и GitHub Actions CI configuration.
 
 ## Установка для разработки
 
@@ -51,18 +63,35 @@ cp .env.example .env
 alembic upgrade head
 ```
 
-## Запуск API
+## Запуск
+
+API:
 
 ```bash
 uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-## Запуск парсера
+Парсер:
 
 ```bash
 python -m src.cli parse
 python -m src.cli parse --source promokood
 ```
+
+Maintenance/scheduler:
+
+```bash
+python -m src.cli maintenance
+python -m src.cli scheduler
+```
+
+Telegram control bot:
+
+```bash
+python -m src.cli bot
+```
+
+Для постоянной работы bot polling и scheduler запускаются как два отдельных процесса.
 
 ## Проверки
 
@@ -70,11 +99,12 @@ python -m src.cli parse --source promokood
 python -m pytest
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/health/db
+curl http://127.0.0.1:8000/health/sources
 ```
 
 Swagger доступен по `/docs`.
 
-## Конфигурация
+## Основная конфигурация
 
 ```dotenv
 DP_APP_NAME=Discount Parser API
@@ -86,11 +116,21 @@ DP_LOG_LEVEL=INFO
 DP_LOG_FORMAT=plain
 DP_TIMEZONE=Europe/Moscow
 DP_DATABASE_URL=sqlite:///./discount_parser.db
+DP_SOURCES_CONFIG_PATH=config/sources.yaml
+DP_COLLECT_INTERVAL_MINUTES=120
+DP_MAINTENANCE_HOUR=22
+DP_MAINTENANCE_MINUTE=0
+DP_STALE_AFTER_DAYS=7
+DP_TELEGRAM_BOT_TOKEN=replace_me
+DP_TELEGRAM_CHANNEL_ID=@replace_me
+DP_TELEGRAM_ADMIN_IDS=123456789
+DP_TELEGRAM_DEFAULT_MIN_DISCOUNT=20
+DP_AUTOPOST_INTERVAL_MINUTES=30
 ```
 
 Источники задаются в `config/sources.yaml`, taxonomy — в `config/taxonomy.yaml`.
 
-## Целевой pipeline
+## Pipeline
 
 ```text
 источники
@@ -105,11 +145,15 @@ source adapters
   ↓
 SQLite
   ↓
-фильтры / очередь
+lifecycle / scheduler
   ↓
-Telegram bot
+filters / queue
+  ↓
+Telegram bot / autopost
   ↓
 Telegram channel
+  ↓
+publication ledger
 ```
 
 Реализация ведётся по этапам `R1–R9` из дорожной карты.
