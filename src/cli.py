@@ -8,6 +8,7 @@ from src.jobs.lifecycle import maintenance
 from src.jobs.scheduler import run_scheduler
 from src.shared.config import get_settings
 from src.sources.runner import run_all
+from src.telegram.bot import run_bot
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,7 +20,8 @@ def build_parser() -> argparse.ArgumentParser:
     parse_cmd.add_argument("--config", default=None, help="Path to sources YAML")
 
     subparsers.add_parser("maintenance", help="Expire and review stale offers")
-    subparsers.add_parser("scheduler", help="Run the collection and maintenance scheduler")
+    subparsers.add_parser("scheduler", help="Run collection, maintenance and autopost scheduler")
+    subparsers.add_parser("bot", help="Run Telegram control bot")
     return parser
 
 
@@ -39,6 +41,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "scheduler":
         run_scheduler()
+        return 0
+
+    if args.command == "bot":
+        run_bot()
         return 0
 
     return 2
