@@ -27,6 +27,8 @@ def _reserve_publication(offer_id: int, channel_id: str) -> tuple[Offer | None, 
         offer = session.get(Offer, offer_id)
         if offer is None:
             return None, None, "offer_not_found"
+        if offer.status != "ready":
+            return offer, None, f"offer_not_publishable:{offer.status}"
 
         existing = (
             session.query(Publication)
@@ -80,6 +82,13 @@ async def publish_offer(bot: Bot, *, offer_id: int, channel_id: str) -> PublishR
     offer, publication, reservation_error = _reserve_publication(offer_id, channel_id)
     if offer is None:
         return PublishResult(offer_id=offer_id, channel_id=channel_id, status="not_found", error=reservation_error)
+    if reservation_error and reservation_error.startswith("offer_not_publishable:"):
+        return PublishResult(
+            offer_id=offer_id,
+            channel_id=channel_id,
+            status="not_publishable",
+            error=reservation_error,
+        )
     if reservation_error is not None:
         return PublishResult(
             offer_id=offer_id,
