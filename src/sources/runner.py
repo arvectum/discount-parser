@@ -80,37 +80,59 @@ def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
             observed_at=now,
         )
     )
+    session.flush()
     return True
 
 
-def run_source(config: SourceConfig) -> RunResult:
-    result = RunResult(source_key=config.key)
+def _record_failed_collection(config: SourceConfig, error: Exception) -> RunResult:
+    message = f"{type(error).__name__}: {error}"
     with session_scope() as session:
         source = _ensure_source(session, config)
-        parse_run = ParseRun(source_id=source.id, status="running")
+        session.add(
+            ParseRun(
+                source_id=source.id,
+                status="failed",
+                finished_at=datetime.now(UTC),
+                error_count=1,
+                error=message,
+            )
+        )
+    return RunResult(source_key=config.key, errors=1, error=message)
+
+
+def run_source(config: SourceConfig) -> RunResult:
+    try:
+        raw_offers = build_adapter(config).collect()
+    except Exception as exc:
+        return _record_failed_collection(config, exc)
+
+    result = RunResult(source_key=config.key, fetched=len(raw_offers))
+    with session_scope() as session:
+        source = _ensure_source(session, config)
+        parse_run = ParseRun(source_id=source.id, status="running", fetched_count=result.fetched)
         session.add(parse_run)
         session.flush()
-        try:
-            adapter = build_adapter(config)
-            raw_offers = adapter.collect()
-            result.fetched = len(raw_offers)
-            parse_run.fetched_count = result.fetched
-            for raw in raw_offers:
-                if _persist_raw_offer(session, source, raw):
+
+        errors: list[str] = []
+        for raw in raw_offers:
+            try:
+                with session.begin_nested():
+                    created = _persist_raw_offer(session, source, raw)
+                if created:
                     result.created += 1
                 else:
                     result.updated += 1
-            parse_run.new_count = result.created
-            parse_run.updated_count = result.updated
-            parse_run.status = "success"
-        except Exception as exc:
-            result.errors = 1
-            result.error = f"{type(exc).__name__}: {exc}"
-            parse_run.error_count = 1
-            parse_run.error = result.error
-            parse_run.status = "failed"
-        finally:
-            parse_run.finished_at = datetime.now(UTC)
+            except Exception as exc:
+                result.errors += 1
+                errors.append(f"{raw.external_id}: {type(exc).__name__}: {exc}")
+
+        parse_run.new_count = result.created
+        parse_run.updated_count = result.updated
+        parse_run.error_count = result.errors
+        parse_run.error = "\n".join(errors)[:10000] if errors else None
+        parse_run.status = "partial" if errors else "success"
+        parse_run.finished_at = datetime.now(UTC)
+        result.error = parse_run.error
     return result
 
 
