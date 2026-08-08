@@ -34,7 +34,7 @@ def run_web_panel() -> None:
     _autostart_packaged_services()
     threading.Thread(target=_open_browser, args=(url,), daemon=True).start()
 
-    from src.web.app import app
+    from src.web.application import app
 
     uvicorn.run(
         app,
