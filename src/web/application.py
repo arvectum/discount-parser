@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import sys
+from urllib.parse import urlparse
 
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import PlainTextResponse
 
 from src.web.app import app
 from src.web.management_pages import router as management_router
@@ -15,9 +17,27 @@ from src.web.system_routes import router as system_router
 app.include_router(management_router)
 app.include_router(system_router)
 
+_LOCAL_HOSTS = {'127.0.0.1', 'localhost', '::1'}
+_MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
-class DashboardNavigationMiddleware(BaseHTTPMiddleware):
+
+def _is_local_url(value: str) -> bool:
+    try:
+        return (urlparse(value).hostname or '').lower() in _LOCAL_HOSTS
+    except ValueError:
+        return False
+
+
+class LocalOriginMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        if request.method in _MUTATING_METHODS:
+            origin = request.headers.get('origin')
+            referer = request.headers.get('referer')
+            if origin and not _is_local_url(origin):
+                return PlainTextResponse('Cross-origin request blocked', status_code=403)
+            if not origin and referer and not _is_local_url(referer):
+                return PlainTextResponse('Cross-origin request blocked', status_code=403)
+
         response = await call_next(request)
 
         # In the installed client build, successful first-run setup should make
@@ -34,30 +54,12 @@ class DashboardNavigationMiddleware(BaseHTTPMiddleware):
                 try:
                     process_manager.start(name)
                 except Exception:
-                    # The dashboard exposes process state/logs and allows retry.
+                    # The System page exposes state/logs and allows retry.
                     pass
-
-        if request.url.path != '/' or response.headers.get('content-type', '').split(';')[0] != 'text/html':
-            return response
-
-        body = b''
-        async for chunk in response.body_iterator:
-            body += chunk
-        text = body.decode('utf-8')
-        marker = '<div class="top">'
-        if marker in text and 'href="/offers"' not in text:
-            nav = '''<div class="tabs" style="margin:0 0 18px">
-              <a href="/">Главная</a>
-              <a href="/offers">Предложения</a>
-              <a href="/runs">Журнал</a>
-              <a href="/system">Система</a>
-            </div>'''
-            text = text.replace('<div class="wrap">', '<div class="wrap">' + nav, 1)
-        headers = dict(response.headers)
-        headers.pop('content-length', None)
-        return Response(content=text, status_code=response.status_code, headers=headers, media_type='text/html')
+        return response
 
 
-app.add_middleware(DashboardNavigationMiddleware)
+app.add_middleware(LocalOriginMiddleware)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=['127.0.0.1', 'localhost', '[::1]', 'testserver'])
 
 __all__ = ['app']
