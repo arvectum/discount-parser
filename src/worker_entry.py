@@ -8,7 +8,10 @@ from alembic import command
 from alembic.config import Config
 
 from src.jobs.scheduler import run_scheduler
+from src.modules.source_registry.seed import seed_registry
 from src.qa.doctor import build_doctor_report
+from src.shared.config import get_settings
+from src.shared.db import session_scope
 from src.telegram.runner import run_bot
 
 
@@ -23,6 +26,9 @@ def _prepare_runtime_directory() -> Path:
 def migrate() -> int:
     _prepare_runtime_directory()
     command.upgrade(Config('alembic.ini'), 'head')
+    settings = get_settings()
+    with session_scope() as session:
+        seed_registry(session, sources_config_path=settings.sources_config_path)
     return 0
 
 
