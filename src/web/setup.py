@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 from src.shared.config import get_settings
@@ -7,11 +9,13 @@ from src.shared.config import get_settings
 ENV_PATH = Path('.env')
 ENV_EXAMPLE_PATH = Path('.env.example')
 
-REQUIRED_TELEGRAM_KEYS = {
-    'DP_TELEGRAM_BOT_TOKEN',
-    'DP_TELEGRAM_CHANNEL_ID',
-    'DP_TELEGRAM_ADMIN_IDS',
-}
+REQUIRED_TELEGRAM_KEYS = frozenset(
+    {
+        'DP_TELEGRAM_BOT_TOKEN',
+        'DP_TELEGRAM_CHANNEL_ID',
+        'DP_TELEGRAM_ADMIN_IDS',
+    }
+)
 
 
 def _read_env(path: Path = ENV_PATH) -> dict[str, str]:
@@ -27,7 +31,14 @@ def _read_env(path: Path = ENV_PATH) -> dict[str, str]:
     return values
 
 
-def _write_env_values(replacements: dict[str, str]) -> None:
+def _single_line(value: str, field_name: str) -> str:
+    value = value.strip()
+    if '\n' in value or '\r' in value or '\x00' in value:
+        raise ValueError(f'{field_name} должен быть указан одной строкой.')
+    return value
+
+
+def _render_env(replacements: dict[str, str]) -> str:
     if ENV_PATH.exists():
         lines = ENV_PATH.read_text(encoding='utf-8').splitlines()
     elif ENV_EXAMPLE_PATH.exists():
@@ -50,8 +61,27 @@ def _write_env_values(replacements: dict[str, str]) -> None:
     for key, value in replacements.items():
         if key not in seen:
             output.append(f'{key}={value}')
+    return '\n'.join(output).rstrip() + '\n'
 
-    ENV_PATH.write_text('\n'.join(output).rstrip() + '\n', encoding='utf-8')
+
+def _atomic_write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix=f'.{path.name}.', suffix='.tmp', dir=str(path.parent), text=True)
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8', newline='\n') as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary_path.replace(path)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def _write_env_values(replacements: dict[str, str]) -> None:
+    clean = {key: _single_line(str(value), key) for key, value in replacements.items()}
+    _atomic_write(ENV_PATH, _render_env(clean))
     get_settings.cache_clear()
 
 
@@ -67,10 +97,10 @@ def save_telegram_setup(
     channel_id: str,
     admin_ids: str,
 ) -> None:
-    bot_token = bot_token.strip()
-    bot_name = bot_name.strip()
-    channel_id = channel_id.strip()
-    admin_ids = admin_ids.strip()
+    bot_token = _single_line(bot_token, 'Токен Telegram-бота')
+    bot_name = _single_line(bot_name, 'Имя бота')
+    channel_id = _single_line(channel_id, 'Telegram-канал')
+    admin_ids = _single_line(admin_ids, 'Telegram user ID')
 
     if ':' not in bot_token or len(bot_token) < 20:
         raise ValueError('Похоже, токен Telegram-бота указан неверно.')
