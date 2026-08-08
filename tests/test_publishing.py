@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -79,8 +80,7 @@ def test_renderer_escapes_user_content(sqlite_db: Path) -> None:
     assert "A&lt;B" in caption
 
 
-@pytest.mark.asyncio
-async def test_publisher_sends_once_and_records_message(sqlite_db: Path) -> None:
+def test_publisher_sends_once_and_records_message(sqlite_db: Path) -> None:
     with create_session() as session:
         offer = Offer(
             title="Скидка 25%",
@@ -94,8 +94,8 @@ async def test_publisher_sends_once_and_records_message(sqlite_db: Path) -> None
         offer_id = offer.id
 
     bot = FakeBot()
-    first = await publish_offer(bot, offer_id=offer_id, channel_id="@channel")
-    second = await publish_offer(bot, offer_id=offer_id, channel_id="@channel")
+    first = asyncio.run(publish_offer(bot, offer_id=offer_id, channel_id="@channel"))
+    second = asyncio.run(publish_offer(bot, offer_id=offer_id, channel_id="@channel"))
 
     assert first.status == "published"
     assert first.telegram_message_id == "101"
