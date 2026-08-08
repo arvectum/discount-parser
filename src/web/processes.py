@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path.cwd() if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,8 +48,13 @@ class ProcessManager:
             if sys.platform == 'win32':
                 creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
+            if getattr(sys, 'frozen', False):
+                command = [sys.executable, name]
+            else:
+                command = [sys.executable, '-m', 'src.cli', name]
+
             process = subprocess.Popen(
-                [sys.executable, '-m', 'src.cli', name],
+                command,
                 cwd=ROOT,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
