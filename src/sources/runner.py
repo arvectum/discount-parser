@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 
 from src.core.classification import classify_offer
 from src.core.dedup import find_existing_offer
-from src.core.normalization import normalize_raw_offer
+from src.core.normalization import NormalizedOffer, normalize_raw_offer
 from src.modules.offers.models import Offer, OfferSourceObservation, ParseRun, Source
 from src.modules.offers.repository import OfferRepository
 from src.shared.db import session_scope
@@ -44,26 +44,8 @@ def _non_empty(values: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in values.items() if value is not None and value != ""}
 
 
-def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
-    observation = session.scalar(
-        select(OfferSourceObservation).where(
-            OfferSourceObservation.source_id == source.id,
-            OfferSourceObservation.external_id == raw.external_id,
-        )
-    )
-    now = datetime.now(UTC)
-    if observation is not None:
-        observation.observed_at = now
-        observation.raw_title = raw.title
-        observation.raw_payload_json = json.dumps(raw.raw_payload or {}, ensure_ascii=False)
-        observation.offer.last_seen_at = now
-        return False
-
-    normalized = normalize_raw_offer(raw)
-    match = find_existing_offer(session, normalized)
-    repo = OfferRepository(session)
-
-    common_values = _non_empty(
+def _normalized_values(raw: RawOffer, normalized: NormalizedOffer, now: datetime) -> dict[str, object]:
+    return _non_empty(
         {
             "title": normalized.title,
             "description": raw.description,
@@ -87,23 +69,53 @@ def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
         }
     )
 
+
+def _update_offer(session, offer: Offer, raw: RawOffer, normalized: NormalizedOffer, now: datetime) -> None:
+    classification = classify_offer(
+        session,
+        title=normalized.title,
+        merchant=normalized.merchant,
+        brand=normalized.brand or offer.brand,
+        offer=offer,
+    )
+    OfferRepository(session).update(
+        offer,
+        {
+            **_normalized_values(raw, normalized, now),
+            "category": classification.category,
+            "subcategory": classification.subcategory,
+        },
+    )
+
+
+def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
+    now = datetime.now(UTC)
+    normalized = normalize_raw_offer(raw)
+    observation = session.scalar(
+        select(OfferSourceObservation).where(
+            OfferSourceObservation.source_id == source.id,
+            OfferSourceObservation.external_id == raw.external_id,
+        )
+    )
+
+    if observation is not None:
+        _update_offer(session, observation.offer, raw, normalized, now)
+        observation.observed_at = now
+        observation.source_url = raw.source_url
+        observation.raw_title = raw.title
+        observation.raw_payload_json = json.dumps(
+            {**(raw.raw_payload or {}), "dedup_reason": "source_external_id", "dedup_score": 100.0},
+            ensure_ascii=False,
+        )
+        session.flush()
+        return False
+
+    match = find_existing_offer(session, normalized)
+    repo = OfferRepository(session)
+
     if match.offer is not None:
         offer = match.offer
-        classification = classify_offer(
-            session,
-            title=normalized.title,
-            merchant=normalized.merchant,
-            brand=normalized.brand or offer.brand,
-            offer=offer,
-        )
-        repo.update(
-            offer,
-            {
-                **common_values,
-                "category": classification.category,
-                "subcategory": classification.subcategory,
-            },
-        )
+        _update_offer(session, offer, raw, normalized, now)
     else:
         classification = classify_offer(
             session,
@@ -127,7 +139,7 @@ def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
             category=classification.category,
             subcategory=classification.subcategory,
             first_seen_at=now,
-            **common_values,
+            **_normalized_values(raw, normalized, now),
         )
 
     session.add(
