@@ -35,10 +35,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Build frozen application Windows
+      - name: Build Windows UI executable
         if: runner.os == 'Windows'
         run: >-
           pyinstaller --noconfirm --clean --onedir --noconsole
+          --distpath dist-ui
+          --workpath build-ui
           --name DiscountParser
           --hidden-import src.web.app
           --hidden-import src.web.application
@@ -47,6 +49,16 @@ jobs:
           --collect-all uvicorn
           --collect-all python_calamine
           src/distribution_entry.py
+
+      - name: Build Windows worker executable
+        if: runner.os == 'Windows'
+        run: >-
+          pyinstaller --noconfirm --clean --onefile --console
+          --distpath dist-worker
+          --workpath build-worker
+          --name DiscountParserWorker
+          --collect-all python_calamine
+          src/worker_entry.py
 
       - name: Build frozen application macOS
         if: runner.os == 'macOS'
@@ -66,7 +78,8 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force delivery\app | Out-Null
-          Copy-Item dist\DiscountParser\* delivery\app -Recurse -Force
+          Copy-Item dist-ui\DiscountParser\* delivery\app -Recurse -Force
+          Copy-Item dist-worker\DiscountParserWorker.exe delivery\app\DiscountParserWorker.exe -Force
           Copy-Item config delivery\app\config -Recurse -Force
           Copy-Item migrations delivery\app\migrations -Recurse -Force
           Copy-Item alembic.ini delivery\app\alembic.ini -Force
@@ -86,17 +99,23 @@ jobs:
           cp packaging/macos/install.command delivery/install.command
           chmod +x delivery/install.command delivery/app/DiscountParser
 
-      - name: Frozen migration smoke Windows
+      - name: Frozen smoke Windows
         if: runner.os == 'Windows'
         shell: pwsh
         working-directory: delivery/app
-        run: .\DiscountParser.exe migrate
+        run: |
+          .\DiscountParserWorker.exe migrate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\DiscountParserWorker.exe doctor
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Frozen migration smoke macOS
+      - name: Frozen smoke macOS
         if: runner.os == 'macOS'
         shell: bash
         working-directory: delivery/app
-        run: ./DiscountParser migrate
+        run: |
+          ./DiscountParser migrate
+          ./DiscountParser doctor
 
       - name: Build native Windows installer
         if: runner.os == 'Windows'
