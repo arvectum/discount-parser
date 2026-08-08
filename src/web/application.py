@@ -6,8 +6,10 @@ from starlette.responses import Response
 
 from src.web.app import app
 from src.web.management_pages import router as management_router
+from src.web.system_routes import router as system_router
 
 app.include_router(management_router)
+app.include_router(system_router)
 
 
 class DashboardNavigationMiddleware(BaseHTTPMiddleware):
@@ -26,6 +28,7 @@ class DashboardNavigationMiddleware(BaseHTTPMiddleware):
               <a href="/">Главная</a>
               <a href="/offers">Предложения</a>
               <a href="/runs">Журнал</a>
+              <a href="/system">Система</a>
             </div>'''
             text = text.replace('<div class="wrap">', '<div class="wrap">' + nav, 1)
         headers = dict(response.headers)
