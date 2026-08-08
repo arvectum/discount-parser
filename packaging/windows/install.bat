@@ -4,11 +4,16 @@ cd /d "%~dp0"
 
 echo ========================================
 echo Discount Parser - Setup
- echo ========================================
+echo ========================================
 echo.
 
 if not exist "app\DiscountParser.exe" (
-  echo [ERROR] Application files are missing.
+  echo [ERROR] Application UI files are missing.
+  pause
+  exit /b 1
+)
+if not exist "app\DiscountParserWorker.exe" (
+  echo [ERROR] Application worker files are missing.
   pause
   exit /b 1
 )
@@ -22,7 +27,7 @@ if errorlevel 8 goto :fail
 
 pushd "%TARGET%"
 echo Preparing database...
-"DiscountParser.exe" migrate
+"DiscountParserWorker.exe" migrate
 if errorlevel 1 (
   popd
   goto :fail
