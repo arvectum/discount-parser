@@ -44,6 +44,19 @@ def _non_empty(values: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in values.items() if value is not None and value != ""}
 
 
+def _has_benefit(normalized: NormalizedOffer) -> bool:
+    return any(
+        value is not None
+        for value in (
+            normalized.discount_percent,
+            normalized.discount_amount,
+            normalized.cashback_percent,
+            normalized.cashback_amount,
+            normalized.delivery_price,
+        )
+    ) or bool(normalized.promo_code) or "бесплат" in normalized.title.lower()
+
+
 def _normalized_values(raw: RawOffer, normalized: NormalizedOffer, now: datetime) -> dict[str, object]:
     return _non_empty(
         {
@@ -78,14 +91,14 @@ def _update_offer(session, offer: Offer, raw: RawOffer, normalized: NormalizedOf
         brand=normalized.brand or offer.brand,
         offer=offer,
     )
-    OfferRepository(session).update(
-        offer,
-        {
-            **_normalized_values(raw, normalized, now),
-            "category": classification.category,
-            "subcategory": classification.subcategory,
-        },
-    )
+    values: dict[str, object] = {
+        **_normalized_values(raw, normalized, now),
+        "category": classification.category,
+        "subcategory": classification.subcategory,
+    }
+    if offer.status in {"new", "needs_review"} and _has_benefit(normalized) and classification.reason != "fallback":
+        values["status"] = "ready"
+    OfferRepository(session).update(offer, values)
 
 
 def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
@@ -123,17 +136,7 @@ def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
             merchant=normalized.merchant,
             brand=normalized.brand,
         )
-        has_benefit = any(
-            value is not None
-            for value in (
-                normalized.discount_percent,
-                normalized.discount_amount,
-                normalized.cashback_percent,
-                normalized.cashback_amount,
-                normalized.delivery_price,
-            )
-        ) or bool(normalized.promo_code) or "бесплат" in normalized.title.lower()
-        status = "ready" if has_benefit and classification.reason != "fallback" else "needs_review"
+        status = "ready" if _has_benefit(normalized) and classification.reason != "fallback" else "needs_review"
         offer = repo.create(
             status=status,
             category=classification.category,
