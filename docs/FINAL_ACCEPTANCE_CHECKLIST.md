@@ -2,6 +2,38 @@
 
 Этот checklist выполняется на реальной машине заказчика после получения готового OS-specific installer/package.
 
+## 0. Preflight / Doctor
+
+Сразу после установки и до live-парсинга открыть страницу `Система` и проверить блок `Самодиагностика`.
+
+Для технической проверки из исходников:
+
+```bash
+python -m src.cli doctor
+```
+
+Для packaged Windows QA используется:
+
+```text
+DiscountParserWorker.exe doctor
+```
+
+Для packaged macOS QA:
+
+```text
+./DiscountParser doctor
+```
+
+Проверить:
+
+- [ ] database = OK;
+- [ ] data_directory = OK;
+- [ ] sources_config = OK и все adapters зарегистрированы;
+- [ ] web_port не занят до запуска панели;
+- [ ] Telegram config после заполнения wizard = OK.
+
+Telegram config до первого запуска может отображаться как `ПРОВЕРИТЬ`; это не блокирует локальную установку.
+
 ## 1. Установка
 
 - [ ] Выбран пакет под правильную ОС/архитектуру.
@@ -11,6 +43,15 @@
 - [ ] Появился ярлык `Discount Parser` / `Discount Parser.app`.
 - [ ] Python, Git и pip отдельно не устанавливались.
 
+Windows delivery содержит два внутренних executable:
+
+```text
+DiscountParser.exe        — локальный web UI без консольного окна
+DiscountParserWorker.exe  — migration / doctor / bot / scheduler
+```
+
+Заказчик вручную запускает только `DiscountParser.exe` через ярлык.
+
 ## 2. Первый запуск
 
 - [ ] Двойной клик открывает браузер на `http://127.0.0.1:8765`.
@@ -19,21 +60,29 @@
 - [ ] Введены Bot Token, Telegram channel и Telegram user ID администратора.
 - [ ] После сохранения открывается dashboard.
 - [ ] Bot и scheduler показываются как запущенные либо имеют понятный лог ошибки на странице `Система`.
+- [ ] Повторно открыта `Система`: Telegram config в Doctor больше не требует проверки.
 
-## 3. Single-instance
+## 3. Single-instance и local security
 
 - [ ] Повторный двойной клик по ярлыку не запускает второй экземпляр.
 - [ ] Открывается уже работающая локальная панель.
+- [ ] Панель доступна только через localhost.
+- [ ] Невалидный Host отклоняется.
+- [ ] Cross-origin POST к управляющим маршрутам отклоняется.
 
 ## 4. Парсер
+
+Сначала тестировать один источник, затем все источники.
 
 - [ ] На главной странице видны все 5 источников.
 - [ ] Источник можно выключить и включить.
 - [ ] Выключенный источник не запускается при следующем сборе.
-- [ ] Нажата кнопка `Запустить сбор сейчас`.
+- [ ] Выполнен тест одного источника.
+- [ ] После него выполнен сбор всех включённых источников.
 - [ ] В `Журнале` появились ParseRun.
 - [ ] Для успешных источников есть fetched/new/updated counters.
 - [ ] Для неуспешных источников виден текст ошибки.
+- [ ] Ошибка одного сайта не остановила остальные источники.
 
 ## 5. Предложения
 
@@ -44,6 +93,8 @@
 - [ ] В карточке отображается provenance по источникам.
 
 ## 6. Telegram
+
+Сначала проверить polling и команды, только после этого публикацию.
 
 - [ ] Бот отвечает разрешённому admin user ID.
 - [ ] `/status` работает.
@@ -119,8 +170,6 @@ discount_parser.db
 python -m src.cli smoke-report --output output/smoke_report.json
 ```
 
-Для packaged acceptance допустимо использовать тот же report service через технический запуск/сборочный QA.
-
 Проверить:
 
 - [ ] source statuses;
@@ -134,7 +183,8 @@ python -m src.cli smoke-report --output output/smoke_report.json
 Полный production acceptance считается пройденным только если:
 
 ```text
-installer/package OK
+Doctor required checks OK
++ installer/package OK
 + first-run wizard OK
 + live source parse OK
 + Telegram polling OK
