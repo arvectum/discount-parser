@@ -81,7 +81,7 @@ def _write_offer_sheet(workbook: xlsxwriter.Workbook, name: str, offers: list[Of
             column = OFFER_HEADERS[col]
             cell_format = editable if column in EDITABLE_COLUMNS else body
             if column in {"discount_percent", "cashback_percent"} and value is not None:
-                cell_format = percent if column not in EDITABLE_COLUMNS else editable
+                cell_format = percent
             sheet.write(row_index, col, value, cell_format)
 
     sheet.freeze_panes(1, 0)
@@ -119,6 +119,7 @@ def export_offers_xlsx(path: str | Path) -> Path:
             "published": [offer for offer in all_offers if offer.status == "published"],
             "expired": [offer for offer in all_offers if offer.status == "expired"],
         }
+    source_statuses = get_source_run_statuses()
 
     workbook = xlsxwriter.Workbook(
         str(destination),
@@ -147,7 +148,7 @@ def export_offers_xlsx(path: str | Path) -> Path:
         body = workbook.add_format({"border": 1})
         for col, value in enumerate(source_headers):
             source_sheet.write(0, col, value, header)
-        for row_index, status in enumerate(get_source_run_statuses(), start=1):
+        for row_index, status in enumerate(source_statuses, start=1):
             values = [
                 status.source_key,
                 status.source_name,
@@ -164,7 +165,7 @@ def export_offers_xlsx(path: str | Path) -> Path:
             for col, value in enumerate(values):
                 source_sheet.write(row_index, col, value, body)
         source_sheet.freeze_panes(1, 0)
-        source_sheet.autofilter(0, 0, max(0, len(get_source_run_statuses())), len(source_headers) - 1)
+        source_sheet.autofilter(0, 0, max(0, len(source_statuses)), len(source_headers) - 1)
         source_sheet.set_column(0, len(source_headers) - 1, 18)
         source_sheet.set_column(1, 1, 28)
         source_sheet.set_column(7, 7, 50)
