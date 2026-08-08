@@ -22,18 +22,17 @@ if not exist ".env" (
 
 set "PYTHON=%CD%\.venv\Scripts\python.exe"
 
-echo Starting Telegram bot...
-start "Discount Parser - Bot" cmd /k "cd /d \"%CD%\" && \"%PYTHON%\" -m src.cli bot"
-
-echo Starting scheduler...
-start "Discount Parser - Scheduler" cmd /k "cd /d \"%CD%\" && \"%PYTHON%\" -m src.cli scheduler"
-
+echo Starting Discount Parser...
+echo Telegram bot + scheduler will run in this window.
+echo Press Ctrl+C to stop.
 echo.
-echo Started in two windows:
-echo   1. Telegram bot
-echo   2. Scheduler
 
-echo Close those windows or press Ctrl+C in each to stop the program.
-echo.
-pause
+"%PYTHON%" -m src.cli run
+
+if errorlevel 1 (
+  echo.
+  echo [ERROR] Discount Parser stopped with an error.
+  pause
+)
+
 endlocal
