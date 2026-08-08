@@ -136,6 +136,7 @@ def add_keyword(
     try:
         session.flush()
     except IntegrityError as exc:
+        session.rollback()
         raise ValueError("keyword already exists in this scope") from exc
     return row
 
@@ -156,6 +157,8 @@ def upsert_candidate(
     if platform not in PLATFORMS:
         raise ValueError(f"Unsupported platform: {platform}")
     normalized_url = url.strip()
+    if not normalized_url:
+        raise ValueError("candidate url is required")
     row = session.scalar(
         select(SourceCandidate).where(SourceCandidate.platform == platform, SourceCandidate.url == normalized_url)
     )
@@ -183,11 +186,15 @@ def review_candidate(
     collector_type: str | None = None,
     trust_level: str = "unknown",
 ) -> RegisteredSource | None:
-    if status not in CANDIDATE_STATUSES - {"new"}:
+    allowed = set(CANDIDATE_STATUSES) - {"new"}
+    if status not in allowed:
         raise ValueError(f"Unsupported review status: {status}")
     candidate = session.get(SourceCandidate, candidate_id)
     if candidate is None:
         raise KeyError(candidate_id)
+    if candidate.status == "approved" and status == "approved":
+        existing = session.scalar(select(RegisteredSource).where(RegisteredSource.url == candidate.url))
+        return existing
     candidate.status = status
     now = _now()
     if status == "approved":
@@ -201,6 +208,9 @@ def review_candidate(
             "rutube": "rutube_public",
             "other": "public_page",
         }
+        existing = session.scalar(select(RegisteredSource).where(RegisteredSource.url == candidate.url))
+        if existing is not None:
+            return existing
         return create_source(
             session,
             name=candidate.name or candidate.merchant or candidate.url,
@@ -349,7 +359,13 @@ def detect_offer_signal(text: str, keywords: Iterable[SourceKeyword] = ()) -> Of
     rows = list(keywords)
     if not rows:
         rows = [
-            SourceKeyword(keyword=k, normalized_keyword=normalize_keyword(k), kind=kind, priority=priority)
+            SourceKeyword(
+                keyword=k,
+                normalized_keyword=normalize_keyword(k),
+                kind=kind,
+                priority=priority,
+                enabled=True,
+            )
             for k, kind, priority in DEFAULT_KEYWORDS
         ]
     for row in rows:
