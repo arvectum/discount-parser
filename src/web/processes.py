@@ -31,6 +31,14 @@ def read_process_log(name: str, *, max_chars: int = 12000) -> str:
     return text[-max(1000, max_chars):]
 
 
+def _frozen_worker_executable() -> Path:
+    if sys.platform == 'win32':
+        candidate = ROOT / 'DiscountParserWorker.exe'
+        if candidate.exists():
+            return candidate
+    return Path(sys.executable)
+
+
 class ProcessManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -53,7 +61,7 @@ class ProcessManager:
     @staticmethod
     def _command(name: str) -> list[str]:
         if getattr(sys, 'frozen', False):
-            return [sys.executable, name]
+            return [str(_frozen_worker_executable()), name]
         return [sys.executable, '-m', 'src.cli', name]
 
     def start(self, name: str) -> ProcessState:
