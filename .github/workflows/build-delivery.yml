@@ -37,6 +37,8 @@ jobs:
           pyinstaller --noconfirm --clean --onedir
           --name DiscountParser
           --hidden-import src.web.app
+          --hidden-import src.web.application
+          --hidden-import src.web.management_pages
           --collect-all uvicorn
           --collect-all python_calamine
           src/distribution_entry.py
