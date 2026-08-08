@@ -63,69 +63,72 @@ def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
     match = find_existing_offer(session, normalized)
     repo = OfferRepository(session)
 
+    common_values = _non_empty(
+        {
+            "title": normalized.title,
+            "description": raw.description,
+            "merchant": normalized.merchant,
+            "brand": normalized.brand,
+            "promo_code": normalized.promo_code,
+            "discount_percent": normalized.discount_percent,
+            "discount_amount": normalized.discount_amount,
+            "old_price": normalized.old_price,
+            "new_price": normalized.new_price,
+            "cashback_percent": normalized.cashback_percent,
+            "cashback_amount": normalized.cashback_amount,
+            "delivery_price": normalized.delivery_price,
+            "canonical_url": normalized.canonical_url,
+            "image_url": raw.image_url,
+            "valid_from": raw.valid_from,
+            "valid_until": raw.valid_until,
+            "offer_type": normalized.offer_type,
+            "fingerprint": normalized.fingerprint,
+            "last_seen_at": now,
+        }
+    )
+
     if match.offer is not None:
         offer = match.offer
         classification = classify_offer(
             session,
             title=normalized.title,
             merchant=normalized.merchant,
-            brand=offer.brand,
+            brand=normalized.brand or offer.brand,
             offer=offer,
         )
         repo.update(
             offer,
-            _non_empty(
-                {
-                    "title": normalized.title,
-                    "description": raw.description,
-                    "merchant": normalized.merchant,
-                    "promo_code": normalized.promo_code,
-                    "discount_percent": normalized.discount_percent,
-                    "discount_amount": normalized.discount_amount,
-                    "old_price": normalized.old_price,
-                    "new_price": normalized.new_price,
-                    "canonical_url": normalized.canonical_url,
-                    "image_url": raw.image_url,
-                    "valid_until": raw.valid_until,
-                    "offer_type": normalized.offer_type,
-                    "fingerprint": normalized.fingerprint,
-                    "category": classification.category,
-                    "subcategory": classification.subcategory,
-                    "last_seen_at": now,
-                }
-            ),
+            {
+                **common_values,
+                "category": classification.category,
+                "subcategory": classification.subcategory,
+            },
         )
     else:
         classification = classify_offer(
             session,
             title=normalized.title,
             merchant=normalized.merchant,
+            brand=normalized.brand,
         )
-        has_benefit = (
-            normalized.discount_percent is not None
-            or normalized.discount_amount is not None
-            or bool(normalized.promo_code)
-        )
+        has_benefit = any(
+            value is not None
+            for value in (
+                normalized.discount_percent,
+                normalized.discount_amount,
+                normalized.cashback_percent,
+                normalized.cashback_amount,
+                normalized.delivery_price,
+            )
+        ) or bool(normalized.promo_code) or "бесплат" in normalized.title.lower()
         status = "ready" if has_benefit and classification.reason != "fallback" else "needs_review"
         offer = repo.create(
             offer_type=normalized.offer_type,
             status=status,
-            title=normalized.title,
-            description=raw.description,
-            merchant=normalized.merchant,
             category=classification.category,
             subcategory=classification.subcategory,
-            promo_code=normalized.promo_code,
-            discount_percent=normalized.discount_percent,
-            discount_amount=normalized.discount_amount,
-            old_price=normalized.old_price,
-            new_price=normalized.new_price,
-            canonical_url=normalized.canonical_url,
-            image_url=raw.image_url,
-            fingerprint=normalized.fingerprint,
-            valid_until=raw.valid_until,
             first_seen_at=now,
-            last_seen_at=now,
+            **common_values,
         )
 
     session.add(
