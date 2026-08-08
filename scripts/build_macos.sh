@@ -14,6 +14,9 @@ pyinstaller --noconfirm --clean --onedir \
   --hidden-import src.web.application \
   --hidden-import src.web.management_pages \
   --hidden-import src.web.system_routes \
+  --hidden-import src.web.source_registry_routes \
+  --hidden-import src.web.source_registry_static_routes \
+  --collect-submodules src.modules.source_registry \
   --collect-all uvicorn \
   --collect-all python_calamine \
   src/distribution_entry.py
