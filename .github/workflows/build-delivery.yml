@@ -14,9 +14,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact: discount-parser-windows
+            artifact: discount-parser-windows-x64
           - os: macos-latest
-            artifact: discount-parser-macos
+            artifact: discount-parser-macos-arm64
+          - os: macos-15-intel
+            artifact: discount-parser-macos-intel
     runs-on: ${{ matrix.os }}
 
     steps:
