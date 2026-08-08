@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
@@ -51,6 +52,7 @@ def create_session() -> Session:
     return get_session_factory()()
 
 
+@contextmanager
 def session_scope() -> Iterator[Session]:
     session = create_session()
     try:
