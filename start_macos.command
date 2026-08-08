@@ -23,17 +23,9 @@ if [ ! -f ".env" ]; then
   exit 1
 fi
 
-osascript <<EOF
- tell application "Terminal"
-   do script "cd " & quoted form of "$PWD" & "; " & quoted form of "$PYTHON" & " -m src.cli bot"
-   do script "cd " & quoted form of "$PWD" & "; " & quoted form of "$PYTHON" & " -m src.cli scheduler"
-   activate
- end tell
-EOF
-
-echo "Started in Terminal:"
-echo "  1. Telegram bot"
-echo "  2. Scheduler"
+echo "Starting Discount Parser..."
+echo "Telegram bot + scheduler will run in this window."
+echo "Press Ctrl+C to stop."
 echo
-echo "Press Ctrl+C in each Terminal tab/window to stop the program."
-read -r -p "Press Enter to close this launcher..."
+
+"$PYTHON" -m src.cli run
