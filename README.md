@@ -8,6 +8,8 @@
 
 ## Документация
 
+- [Поставка заказчику](docs/CLIENT_DELIVERY_GUIDE.md)
+- [Требования к инфраструктуре](docs/INFRASTRUCTURE_REQUIREMENTS.md)
 - [Пользовательская инструкция по установке и запуску](docs/USER_INSTALLATION_GUIDE.md)
 - [Техническое задание MVP v1.0](docs/TECHNICAL_SPEC_V1.md)
 - [Дорожная карта](docs/ROADMAP.md)
@@ -49,8 +51,13 @@
 - XLSX export/import: `active`, `needs_review`, `published`, `expired`, `sources`;
 - `/export` и `/import` в Telegram;
 - manual category/subcategory overrides + conservative exact-title rule memory;
+- локальная web-панель: setup wizard, parser/bot/scheduler controls, schedule, sources, filters, queue, XLSX;
+- web browser предложений с поиском, фильтрами и карточкой Offer;
+- web-журнал последних ParseRun и ошибок источников;
+- persisted enabled/disabled состояния источников в SQLite;
+- frozen delivery builds для Windows/macOS и Windows `DiscountParser-Setup.exe`;
 - smoke-report generator для delivery evidence;
-- CLI parse/maintenance/scheduler/bot/smoke-report;
+- CLI parse/maintenance/scheduler/bot/run/web/smoke-report;
 - deterministic fixtures/tests и GitHub Actions CI configuration.
 
 ## Установка для разработки
@@ -67,7 +74,17 @@ cp .env.example .env
 alembic upgrade head
 ```
 
+Конечному пользователю development-установка не требуется: delivery-сборка содержит Python runtime и устанавливается отдельным installer/package.
+
 ## Запуск
+
+Web control panel:
+
+```bash
+python -m src.cli web
+```
+
+По умолчанию панель открывается локально на `http://127.0.0.1:8765`.
 
 API:
 
@@ -95,7 +112,11 @@ Telegram control bot:
 python -m src.cli bot
 ```
 
-Для постоянной работы bot polling и scheduler запускаются как два отдельных процесса.
+Bot + scheduler together:
+
+```bash
+python -m src.cli run
+```
 
 Delivery/smoke report:
 
@@ -124,6 +145,7 @@ DP_ENV=local
 DP_DEBUG=false
 DP_HOST=127.0.0.1
 DP_PORT=8000
+DP_WEB_PORT=8765
 DP_LOG_LEVEL=INFO
 DP_LOG_FORMAT=plain
 DP_TIMEZONE=Europe/Moscow
@@ -140,7 +162,13 @@ DP_TELEGRAM_DEFAULT_MIN_DISCOUNT=20
 DP_AUTOPOST_INTERVAL_MINUTES=30
 ```
 
-Источники задаются в `config/sources.yaml`, taxonomy — в `config/taxonomy.yaml`.
+В клиентской версии Telegram и operational settings настраиваются через web UI, а не вручную через `.env`.
+
+## Инфраструктура
+
+Для текущего локального сценария отдельный сервер не нужен. Приложение может работать на обычном ноутбуке Windows/macOS с интернетом. SQLite, web UI, scheduler и Telegram polling работают локально.
+
+Автоматическая работа продолжается только пока ноутбук включён, не находится в sleep/hibernation и запущен Discount Parser. Для режима 24/7 приложение можно перенести на небольшой постоянно включённый ПК/VPS без изменения основной логики. Подробности: [требования к инфраструктуре](docs/INFRASTRUCTURE_REQUIREMENTS.md).
 
 ## Pipeline
 
