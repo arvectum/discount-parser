@@ -4,9 +4,7 @@
 
 ## Статус
 
-**MVP v1.0 — R6 завершён, R7 реализован; live Telegram smoke ожидает реальные credentials.**
-
-Следующий независимый этап: **R8 — XLSX correction loop + rule memory**.
+**MVP v1.0 — R1–R8 реализованы. R9 QA-контур реализуется; live Telegram smoke требует настроенных credentials.**
 
 ## Документация
 
@@ -19,6 +17,7 @@
 - [R5 implementation](docs/R5_IMPLEMENTATION.md)
 - [R6 implementation](docs/R6_IMPLEMENTATION.md)
 - [R7 implementation](docs/R7_IMPLEMENTATION.md)
+- [R8 implementation](docs/R8_IMPLEMENTATION.md)
 
 ## Реализовано
 
@@ -40,13 +39,17 @@
 - APScheduler: collection + maintenance + autopost;
 - lifecycle: explicit expiry и conservative stale review;
 - Telegram control bot на aiogram 3;
-- admin allowlist;
+- deny-by-default admin allowlist;
 - `/status`, `/sources`, `/new`, `/queue`, `/filter`, `/autopost`;
 - filter по скидке/category/subcategory/type, service-level merchant/source filters;
 - preview + publish/skip/reject;
 - image → text fallback;
 - publication ledger с `telegram_message_id` и защитой от дублей;
-- CLI parse/maintenance/scheduler/bot;
+- XLSX export/import: `active`, `needs_review`, `published`, `expired`, `sources`;
+- `/export` и `/import` в Telegram;
+- manual category/subcategory overrides + conservative exact-title rule memory;
+- smoke-report generator для delivery evidence;
+- CLI parse/maintenance/scheduler/bot/smoke-report;
 - deterministic fixtures/tests и GitHub Actions CI configuration.
 
 ## Установка для разработки
@@ -93,9 +96,17 @@ python -m src.cli bot
 
 Для постоянной работы bot polling и scheduler запускаются как два отдельных процесса.
 
+Delivery/smoke report:
+
+```bash
+python -m src.cli smoke-report
+python -m src.cli smoke-report --output output/smoke_report.json
+```
+
 ## Проверки
 
 ```bash
+python -m compileall -q src tests
 python -m pytest
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/health/db
@@ -154,6 +165,8 @@ Telegram bot / autopost
 Telegram channel
   ↓
 publication ledger
+  ↓
+XLSX correction / rule memory
 ```
 
 Реализация ведётся по этапам `R1–R9` из дорожной карты.
