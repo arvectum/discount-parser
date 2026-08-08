@@ -6,8 +6,12 @@ import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from sqlalchemy import inspect, select
+
+from src.modules.source_registry.collectors import COLLECTORS
+from src.modules.source_registry.models import RegisteredSource
 from src.shared.config import get_settings
-from src.shared.db import check_db_connection
+from src.shared.db import check_db_connection, create_session, get_engine
 from src.sources.config import load_source_configs
 from src.sources.registry import build_adapter
 
@@ -78,6 +82,64 @@ def _check_sources() -> DoctorCheck:
     return DoctorCheck('sources_config', True, f'источников: {len(configs)}, adapters: OK, включено по умолчанию: {enabled}')
 
 
+def _check_source_registry() -> DoctorCheck:
+    required_tables = {
+        'registered_sources',
+        'source_keywords',
+        'source_candidates',
+        'source_keyword_links',
+        'source_items',
+    }
+    try:
+        tables = set(inspect(get_engine()).get_table_names())
+    except Exception as exc:
+        return DoctorCheck('source_registry', False, f'{type(exc).__name__}: {exc}')
+    missing = sorted(required_tables - tables)
+    if missing:
+        return DoctorCheck('source_registry', False, 'не применена миграция: ' + ', '.join(missing))
+
+    try:
+        with create_session() as session:
+            sources = session.scalars(select(RegisteredSource)).all()
+    except Exception as exc:
+        return DoctorCheck('source_registry', False, f'не удалось прочитать registry: {type(exc).__name__}: {exc}')
+
+    unknown_collectors = sorted(
+        {source.collector_type for source in sources if source.collector_type != 'legacy_adapter' and source.collector_type not in COLLECTORS}
+    )
+    if unknown_collectors:
+        return DoctorCheck('source_registry', False, 'неизвестные collectors: ' + ', '.join(unknown_collectors))
+
+    enabled = sum(1 for source in sources if source.enabled)
+    platforms = sorted({source.platform for source in sources})
+    return DoctorCheck(
+        'source_registry',
+        True,
+        f'зарегистрировано: {len(sources)}, enabled: {enabled}, platforms: {", ".join(platforms) if platforms else "—"}',
+    )
+
+
+def _check_social_credentials() -> DoctorCheck:
+    settings = get_settings()
+    try:
+        with create_session() as session:
+            enabled_vk = session.scalar(
+                select(RegisteredSource.id).where(
+                    RegisteredSource.enabled.is_(True),
+                    RegisteredSource.collector_type == 'vk_api',
+                ).limit(1)
+            )
+    except Exception:
+        # source_registry required check will report schema problems.
+        return DoctorCheck('social_credentials', True, 'registry пока недоступен для credential-check', required=False)
+    missing: list[str] = []
+    if enabled_vk is not None and not settings.vk_access_token:
+        missing.append('DP_VK_ACCESS_TOKEN')
+    if missing:
+        return DoctorCheck('social_credentials', False, 'для включённых collectors не заполнено: ' + ', '.join(missing), required=False)
+    return DoctorCheck('social_credentials', True, 'credential-dependent collectors настроены или не используются', required=False)
+
+
 def _check_telegram() -> DoctorCheck:
     settings = get_settings()
     missing = []
@@ -114,6 +176,8 @@ def build_doctor_report(*, check_web_port: bool = True) -> DoctorReport:
         _check_database(),
         _check_writable_directory(_data_directory()),
         _check_sources(),
+        _check_source_registry(),
+        _check_social_credentials(),
         _check_telegram(),
     ]
     if check_web_port:
