@@ -124,17 +124,19 @@ def test_accelerated_scheduler_executes_collection_job(monkeypatch: pytest.Monke
     scheduler = build_scheduler(
         collect_callable=lambda: calls.append(time.monotonic()),
         maintenance_callable=lambda: None,
+        autopost_callable=lambda: None,
         background=True,
         collect_interval_seconds=0.1,
     )
     jobs = {job.id: job for job in scheduler.get_jobs()}
-    assert set(jobs) == {"collect_sources", "maintenance"}
+    assert set(jobs) == {"collect_sources", "maintenance", "autopost"}
     assert jobs["collect_sources"].max_instances == 1
     assert jobs["maintenance"].max_instances == 1
+    assert jobs["autopost"].max_instances == 1
 
     scheduler.start()
     try:
-        time.sleep(0.28)
+        time.sleep(0.35)
     finally:
         scheduler.shutdown(wait=True)
         get_settings.cache_clear()
