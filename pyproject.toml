@@ -9,6 +9,7 @@ description = "Discount and promo-code aggregation pipeline with Telegram publis
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "aiogram>=3.13,<4.0",
   "alembic>=1.14,<2.0",
   "apscheduler>=3.10,<4.0",
   "beautifulsoup4>=4.12,<5.0",
