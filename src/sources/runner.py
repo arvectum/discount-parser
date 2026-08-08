@@ -123,7 +123,6 @@ def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
         ) or bool(normalized.promo_code) or "бесплат" in normalized.title.lower()
         status = "ready" if has_benefit and classification.reason != "fallback" else "needs_review"
         offer = repo.create(
-            offer_type=normalized.offer_type,
             status=status,
             category=classification.category,
             subcategory=classification.subcategory,
