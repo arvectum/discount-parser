@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from aiogram import Bot
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 
@@ -21,9 +21,10 @@ from src.modules.xlsx.service import export_offers_xlsx, import_offer_correction
 from src.shared.config import get_settings
 from src.shared.db import create_session
 from src.sources.runner import run_all
+from src.sources.state import list_source_states, set_persisted_source_enabled
 from src.telegram.publisher import publish_offer
 from src.web.processes import process_manager
-from src.web.setup import is_setup_complete, save_telegram_setup
+from src.web.setup import is_setup_complete, save_operational_settings, save_telegram_setup
 
 app = FastAPI(title='Discount Parser Control Panel', docs_url=None, redoc_url=None)
 _parse_lock = threading.Lock()
@@ -32,7 +33,7 @@ _parse_state = {'running': False, 'last_error': None, 'last_finished': None}
 STYLE = '''
 <style>
 :root{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#18212f;background:#f5f7fb}
-*{box-sizing:border-box}body{margin:0}.wrap{max-width:1240px;margin:auto;padding:32px}.top{display:flex;justify-content:space-between;align-items:center;gap:16px}.brand h1{margin:0;font-size:28px}.muted{color:#64748b}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:24px 0}.card{background:white;border:1px solid #e5e7eb;border-radius:16px;padding:18px;box-shadow:0 6px 20px rgba(15,23,42,.05)}.metric{font-size:28px;font-weight:700;margin-top:5px}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.btn{display:inline-block;border:0;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer;text-decoration:none;background:#111827;color:white}.btn.secondary{background:#e5e7eb;color:#111827}.btn.good{background:#0f766e}.btn.bad{background:#b91c1c}.btn.warn{background:#b45309}.btn:disabled{opacity:.45;cursor:not-allowed}.pill{display:inline-block;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700}.on{background:#dcfce7;color:#166534}.off{background:#fee2e2;color:#991b1b}.section{margin-top:20px}.source{display:grid;grid-template-columns:1.4fr .7fr .7fr 1fr;gap:10px;padding:10px 0;border-bottom:1px solid #eef2f7}.setup{max-width:680px;margin:50px auto;background:white;padding:30px;border-radius:18px;border:1px solid #e5e7eb}.field{margin:16px 0}.field label{display:block;font-weight:650;margin-bottom:6px}.field input,.field select{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;background:white}.error{background:#fee2e2;color:#991b1b;padding:12px;border-radius:10px}.ok{background:#dcfce7;color:#166534;padding:12px;border-radius:10px}.queue{display:grid;gap:12px}.offer{border:1px solid #e5e7eb;border-radius:12px;padding:14px}.offer h4{margin:0 0 8px}.offer-meta{display:flex;gap:10px;flex-wrap:wrap;font-size:13px;color:#64748b}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.tabs a{padding:8px 12px;border-radius:8px;background:#eef2f7;color:#334155;text-decoration:none;font-weight:650}.filter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.filter-grid .field{margin:0}.small{font-size:13px}.flash{margin:18px 0}@media(max-width:700px){.source{grid-template-columns:1fr 1fr}.wrap{padding:18px}.top{align-items:flex-start;flex-direction:column}}
+*{box-sizing:border-box}body{margin:0}.wrap{max-width:1240px;margin:auto;padding:32px}.top{display:flex;justify-content:space-between;align-items:center;gap:16px}.brand h1{margin:0;font-size:28px}.muted{color:#64748b}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:24px 0}.card{background:white;border:1px solid #e5e7eb;border-radius:16px;padding:18px;box-shadow:0 6px 20px rgba(15,23,42,.05)}.metric{font-size:28px;font-weight:700;margin-top:5px}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.btn{display:inline-block;border:0;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer;text-decoration:none;background:#111827;color:white}.btn.secondary{background:#e5e7eb;color:#111827}.btn.good{background:#0f766e}.btn.bad{background:#b91c1c}.btn.warn{background:#b45309}.btn:disabled{opacity:.45;cursor:not-allowed}.pill{display:inline-block;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700}.on{background:#dcfce7;color:#166534}.off{background:#fee2e2;color:#991b1b}.section{margin-top:20px}.source{display:grid;grid-template-columns:1.4fr .65fr .65fr 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid #eef2f7;align-items:center}.setup{max-width:680px;margin:50px auto;background:white;padding:30px;border-radius:18px;border:1px solid #e5e7eb}.field{margin:16px 0}.field label{display:block;font-weight:650;margin-bottom:6px}.field input,.field select{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;background:white}.error{background:#fee2e2;color:#991b1b;padding:12px;border-radius:10px}.ok{background:#dcfce7;color:#166534;padding:12px;border-radius:10px}.queue{display:grid;gap:12px}.offer{border:1px solid #e5e7eb;border-radius:12px;padding:14px}.offer h4{margin:0 0 8px}.offer-meta{display:flex;gap:10px;flex-wrap:wrap;font-size:13px;color:#64748b}.filter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.filter-grid .field{margin:0}.small{font-size:13px}.flash{margin:18px 0}@media(max-width:800px){.source{grid-template-columns:1fr 1fr}.wrap{padding:18px}.top{align-items:flex-start;flex-direction:column}}
 </style>
 '''
 
@@ -99,6 +100,20 @@ def _filter_form() -> str:
     </form>'''
 
 
+def _schedule_form() -> str:
+    settings = get_settings()
+    return f'''<form method="post" action="/schedule">
+      <div class="filter-grid">
+        <div class="field"><label>Сбор каждые, минут</label><input type="number" min="1" max="10080" name="collect_interval_minutes" value="{settings.collect_interval_minutes}" required></div>
+        <div class="field"><label>Автопост каждые, минут</label><input type="number" min="1" max="10080" name="autopost_interval_minutes" value="{settings.autopost_interval_minutes}" required></div>
+        <div class="field"><label>Maintenance, час</label><input type="number" min="0" max="23" name="maintenance_hour" value="{settings.maintenance_hour}" required></div>
+        <div class="field"><label>Maintenance, минута</label><input type="number" min="0" max="59" name="maintenance_minute" value="{settings.maintenance_minute}" required></div>
+        <div class="field"><label>Без обновления → review, дней</label><input type="number" min="1" max="365" name="stale_after_days" value="{settings.stale_after_days}" required></div>
+      </div>
+      <div class="row" style="margin-top:14px"><button class="btn good" type="submit">Сохранить расписание</button><span class="muted small">Если scheduler работает, он перезапустится автоматически.</span></div>
+    </form>'''
+
+
 def _queue_html() -> str:
     settings = get_settings()
     if not settings.telegram_channel_id:
@@ -132,20 +147,35 @@ def _queue_html() -> str:
     return '<div class="queue">' + ''.join(chunks) + '</div>'
 
 
+def _source_rows() -> str:
+    settings = get_settings()
+    states = {item.key: item for item in list_source_states(settings.sources_config_path)}
+    statuses = {item.source_key: item for item in get_source_run_statuses()}
+    rows: list[str] = []
+    for state in states.values():
+        status = statuses.get(state.key)
+        enabled_badge = '<span class="pill on">ВКЛЮЧЁН</span>' if state.enabled else '<span class="pill off">ВЫКЛЮЧЕН</span>'
+        action = 'disable' if state.enabled else 'enable'
+        action_label = 'Выключить' if state.enabled else 'Включить'
+        action_class = 'bad' if state.enabled else 'good'
+        rows.append(
+            f'<div class="source"><div><b>{html.escape(state.name)}</b><div class="muted">{html.escape(state.key)}</div></div>'
+            f'<div>{enabled_badge}<div class="muted small" style="margin-top:5px">{html.escape(status.last_status if status and status.last_status else "never")}</div></div>'
+            f'<div>{status.fetched_count if status else 0}</div>'
+            f'<div class="muted">{html.escape(str(status.last_finished_at if status and status.last_finished_at else "—"))}</div>'
+            f'<div><form method="post" action="/source/{html.escape(state.key)}/{action}"><button class="btn {action_class}">{action_label}</button></form></div></div>'
+        )
+    return ''.join(rows) or '<p class="muted">Источники не настроены.</p>'
+
+
 @app.get('/', response_class=HTMLResponse)
-def dashboard(request: Request, message: str | None = None):
+def dashboard(message: str | None = None):
     if not is_setup_complete():
         return RedirectResponse('/setup', status_code=303)
 
     settings = get_settings()
     metrics = _metrics()
     states = process_manager.states()
-    sources = get_source_run_statuses()
-    source_rows = ''.join(
-        f'<div class="source"><div><b>{html.escape(item.source_name)}</b><div class="muted">{html.escape(item.source_key)}</div></div>'
-        f'<div>{html.escape(item.last_status or "never")}</div><div>{item.fetched_count}</div><div class="muted">{html.escape(str(item.last_finished_at or "—"))}</div></div>'
-        for item in sources
-    ) or '<p class="muted">Источники ещё не запускались.</p>'
 
     def proc_card(name: str, label: str) -> str:
         state = states[name]
@@ -160,7 +190,7 @@ def dashboard(request: Request, message: str | None = None):
     flash = f'<div class="ok flash">{html.escape(message)}</div>' if message else ''
 
     body = f'''<div class="wrap">
-    <div class="top"><div class="brand"><h1>Discount Parser</h1><div class="muted">Панель управления парсером и Telegram-ботом</div></div><div class="row"><a class="btn secondary" href="/export">Скачать XLSX</a><a class="btn secondary" href="/setup">Настройки</a></div></div>
+    <div class="top"><div class="brand"><h1>Discount Parser</h1><div class="muted">Панель управления парсером и Telegram-ботом</div></div><div class="row"><a class="btn secondary" href="/export">Скачать XLSX</a><a class="btn secondary" href="/setup">Telegram</a></div></div>
     {flash}
     <div class="grid">
       <div class="card"><div class="muted">Всего предложений</div><div class="metric">{metrics['total']}</div></div>
@@ -173,10 +203,11 @@ def dashboard(request: Request, message: str | None = None):
       <div class="card"><b>Парсер</b><div style="margin:12px 0">{parse_status}</div><form method="post" action="/parse"><button class="btn good" {'disabled' if _parse_state['running'] else ''}>Запустить сбор сейчас</button></form><div class="muted" style="margin-top:8px">Последний запуск: {html.escape(str(_parse_state['last_finished'] or '—'))}</div>{parse_error}</div>
     </div>
     <div class="card section"><div class="row" style="justify-content:space-between"><div><b>Telegram</b><div class="muted">{html.escape(settings.telegram_bot_name or 'Бот')} → {html.escape(settings.telegram_channel_id or '')}</div></div><a class="btn secondary" href="/setup">Изменить</a></div></div>
+    <div class="card section"><h3 style="margin-top:0">Расписание</h3><div class="muted small" style="margin-bottom:16px">Все интервалы меняются здесь, без редактирования .env.</div>{_schedule_form()}</div>
+    <div class="card section"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">Источники</h3><div class="muted small">Включайте и выключайте источники; выбор хранится в базе и сохраняется при обновлениях.</div></div></div><div class="source" style="margin-top:14px"><b>Источник</b><b>Состояние</b><b>Получено</b><b>Последний запуск</b><b>Действие</b></div>{_source_rows()}</div>
     <div class="card section"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">Фильтр публикации</h3><div class="muted small">Одинаковый для веб-панели, Telegram `/queue` и автопостинга.</div></div></div><div style="margin-top:16px">{_filter_form()}</div></div>
     <div class="card section"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">Очередь публикации</h3><div class="muted small">До 20 следующих предложений по текущему фильтру.</div></div></div><div style="margin-top:16px">{_queue_html()}</div></div>
     <div class="card section"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">XLSX-коррекция</h3><div class="muted small">Скачайте файл, меняйте только category/subcategory и загрузите обратно.</div></div><a class="btn secondary" href="/export">Экспорт</a></div><form method="post" action="/import" enctype="multipart/form-data" class="row" style="margin-top:14px"><input type="file" name="file" accept=".xlsx" required><button class="btn good">Импортировать XLSX</button></form></div>
-    <div class="card section"><h3>Источники</h3><div class="source"><b>Источник</b><b>Статус</b><b>Получено</b><b>Последний запуск</b></div>{source_rows}</div>
     </div>'''
     return HTMLResponse(_layout('Discount Parser', body))
 
@@ -209,6 +240,47 @@ def setup_save(
     except ValueError as exc:
         return setup_page(error=str(exc))
     return RedirectResponse('/?message=Настройки+сохранены', status_code=303)
+
+
+@app.post('/schedule')
+def save_schedule(
+    collect_interval_minutes: int = Form(...),
+    autopost_interval_minutes: int = Form(...),
+    maintenance_hour: int = Form(...),
+    maintenance_minute: int = Form(...),
+    stale_after_days: int = Form(...),
+):
+    try:
+        save_operational_settings(
+            collect_interval_minutes=collect_interval_minutes,
+            autopost_interval_minutes=autopost_interval_minutes,
+            maintenance_hour=maintenance_hour,
+            maintenance_minute=maintenance_minute,
+            stale_after_days=stale_after_days,
+        )
+    except ValueError as exc:
+        return RedirectResponse('/?message=' + str(exc).replace(' ', '+'), status_code=303)
+
+    scheduler_running = process_manager.state('scheduler').running
+    if scheduler_running:
+        process_manager.stop('scheduler')
+        process_manager.start('scheduler')
+    return RedirectResponse('/?message=Расписание+сохранено', status_code=303)
+
+
+@app.post('/source/{source_key}/{action}')
+def source_action(source_key: str, action: str):
+    if action not in {'enable', 'disable'}:
+        return HTMLResponse('Unsupported action', status_code=400)
+    try:
+        set_persisted_source_enabled(
+            source_key,
+            enabled=action == 'enable',
+            path=get_settings().sources_config_path,
+        )
+    except KeyError:
+        return HTMLResponse('Unknown source', status_code=404)
+    return RedirectResponse('/?message=Источник+обновлён', status_code=303)
 
 
 @app.post('/filter')
