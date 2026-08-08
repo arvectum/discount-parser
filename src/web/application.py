@@ -12,9 +12,11 @@ from src.web.app import app
 from src.web.management_pages import router as management_router
 from src.web.processes import process_manager
 from src.web.setup import is_setup_complete
+from src.web.source_registry_routes import router as source_registry_router
 from src.web.system_routes import router as system_router
 
 app.include_router(management_router)
+app.include_router(source_registry_router)
 app.include_router(system_router)
 
 _LOCAL_HOSTS = {'127.0.0.1', 'localhost', '::1'}
@@ -67,6 +69,7 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
         if '<div class="wrap">' in text and 'href="/offers"' not in text:
             nav = '''<div class="row" style="margin:0 0 18px">
               <a class="btn secondary" href="/">Главная</a>
+              <a class="btn secondary" href="/sources-registry">Источники</a>
               <a class="btn secondary" href="/offers">Предложения</a>
               <a class="btn secondary" href="/runs">Журнал</a>
               <a class="btn secondary" href="/system">Система</a>
