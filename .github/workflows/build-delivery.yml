@@ -35,13 +35,28 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Build frozen application
+      - name: Build frozen application Windows
+        if: runner.os == 'Windows'
+        run: >-
+          pyinstaller --noconfirm --clean --onedir --noconsole
+          --name DiscountParser
+          --hidden-import src.web.app
+          --hidden-import src.web.application
+          --hidden-import src.web.management_pages
+          --hidden-import src.web.system_routes
+          --collect-all uvicorn
+          --collect-all python_calamine
+          src/distribution_entry.py
+
+      - name: Build frozen application macOS
+        if: runner.os == 'macOS'
         run: >-
           pyinstaller --noconfirm --clean --onedir
           --name DiscountParser
           --hidden-import src.web.app
           --hidden-import src.web.application
           --hidden-import src.web.management_pages
+          --hidden-import src.web.system_routes
           --collect-all uvicorn
           --collect-all python_calamine
           src/distribution_entry.py
