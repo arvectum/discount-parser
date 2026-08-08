@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path.cwd() if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[2]
+ROOT = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True, slots=True)
