@@ -2,18 +2,26 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from src.sources.adapters.berikod import BerikodAdapter
+from src.sources.adapters.promko import PromkoAdapter
+from src.sources.adapters.promokodik import PromokodikAdapter
+from src.sources.adapters.promokodi_net_ru import PromokodiNetRuAdapter
 from src.sources.adapters.promokood import PromokoodAdapter
 from src.sources.config import SourceConfig
 
 AdapterFactory = Callable[[SourceConfig], object]
 
 
-def _promokood(config: SourceConfig) -> PromokoodAdapter:
-    return PromokoodAdapter(config.base_url)
+def _factory(adapter_cls):
+    return lambda config: adapter_cls(config.base_url)
 
 
 ADAPTER_REGISTRY: dict[str, AdapterFactory] = {
-    "promokood": _promokood,
+    "promokood": _factory(PromokoodAdapter),
+    "promokodik": _factory(PromokodikAdapter),
+    "berikod": _factory(BerikodAdapter),
+    "promokodi_net_ru": _factory(PromokodiNetRuAdapter),
+    "promko": _factory(PromkoAdapter),
 }
 
 
