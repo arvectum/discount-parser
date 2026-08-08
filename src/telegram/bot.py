@@ -24,7 +24,7 @@ router = Router(name="discount-parser-admin")
 def _is_admin(user_id: int | None) -> bool:
     settings = get_settings()
     admins = settings.telegram_admin_id_set
-    return user_id is not None and (not admins or user_id in admins)
+    return user_id is not None and user_id in admins
 
 
 async def _deny_if_needed(event: Message | CallbackQuery) -> bool:
@@ -88,6 +88,48 @@ def _queue(limit: int | None = None) -> list[Offer]:
         return list_publish_candidates(session, channel_id=settings.telegram_channel_id, criteria=criteria)
 
 
+def _filter_categories() -> list[str]:
+    with create_session() as session:
+        values = session.scalars(
+            select(Offer.category)
+            .where(Offer.category.is_not(None), Offer.category != "")
+            .distinct()
+            .order_by(Offer.category)
+            .limit(8)
+        ).all()
+    return [value for value in values if value and len(f"filter_cat:{value}".encode("utf-8")) <= 64]
+
+
+def _filter_keyboard() -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(text="10%", callback_data="filter_min:10"),
+            InlineKeyboardButton(text="20%", callback_data="filter_min:20"),
+            InlineKeyboardButton(text="30%", callback_data="filter_min:30"),
+            InlineKeyboardButton(text="50%", callback_data="filter_min:50"),
+        ],
+        [
+            InlineKeyboardButton(text="Все типы", callback_data="filter_type:all"),
+            InlineKeyboardButton(text="Скидка", callback_data="filter_type:discount"),
+            InlineKeyboardButton(text="Промокод", callback_data="filter_type:promo"),
+        ],
+        [
+            InlineKeyboardButton(text="Кэшбэк", callback_data="filter_type:cashback"),
+            InlineKeyboardButton(text="Доставка", callback_data="filter_type:delivery"),
+        ],
+        [InlineKeyboardButton(text="Все категории", callback_data="filter_cat:all")],
+    ]
+    categories = _filter_categories()
+    for index in range(0, len(categories), 2):
+        rows.append(
+            [
+                InlineKeyboardButton(text=category, callback_data=f"filter_cat:{category}")
+                for category in categories[index : index + 2]
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @router.message(Command("start"))
 async def start_command(message: Message) -> None:
     if await _deny_if_needed(message):
@@ -98,7 +140,7 @@ async def start_command(message: Message) -> None:
         "/sources — источники\n"
         "/new — новые предложения\n"
         "/queue — очередь по фильтру\n"
-        "/filter — минимальная скидка\n"
+        "/filter — фильтр публикации\n"
         "/autopost — автопубликация"
     )
 
@@ -178,18 +220,13 @@ async def filter_command(message: Message) -> None:
         return
     settings = get_settings()
     row = get_or_create_default_filter(min_discount_percent=settings.telegram_default_min_discount)
-    current = row.min_discount_percent
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="10%", callback_data="filter_min:10"),
-                InlineKeyboardButton(text="20%", callback_data="filter_min:20"),
-                InlineKeyboardButton(text="30%", callback_data="filter_min:30"),
-                InlineKeyboardButton(text="50%", callback_data="filter_min:50"),
-            ]
-        ]
+    await message.answer(
+        "Фильтр публикации\n"
+        f"Минимальная скидка: {row.min_discount_percent or 0}%\n"
+        f"Категория: {row.category or 'все'}\n"
+        f"Тип: {row.offer_type or 'все'}",
+        reply_markup=_filter_keyboard(),
     )
-    await message.answer(f"Минимальная скидка: {current or 0}%", reply_markup=keyboard)
 
 
 @router.callback_query(F.data.startswith("filter_min:"))
@@ -200,7 +237,35 @@ async def filter_min_callback(callback: CallbackQuery) -> None:
     update_default_filter(min_discount_percent=value)
     await callback.answer(f"Фильтр: от {value:g}%")
     if callback.message:
-        await callback.message.edit_text(f"Минимальная скидка: {value:g}%")
+        await callback.message.edit_text(f"Минимальная скидка: {value:g}%", reply_markup=_filter_keyboard())
+
+
+@router.callback_query(F.data.startswith("filter_type:"))
+async def filter_type_callback(callback: CallbackQuery) -> None:
+    if await _deny_if_needed(callback):
+        return
+    value = callback.data.split(":", 1)[1]
+    update_default_filter(offer_type=None if value == "all" else value)
+    await callback.answer("Тип обновлён")
+    if callback.message:
+        await callback.message.edit_text(
+            f"Тип предложения: {'все' if value == 'all' else value}",
+            reply_markup=_filter_keyboard(),
+        )
+
+
+@router.callback_query(F.data.startswith("filter_cat:"))
+async def filter_category_callback(callback: CallbackQuery) -> None:
+    if await _deny_if_needed(callback):
+        return
+    value = callback.data.split(":", 1)[1]
+    update_default_filter(category=None if value == "all" else value, subcategory=None)
+    await callback.answer("Категория обновлена")
+    if callback.message:
+        await callback.message.edit_text(
+            f"Категория: {'все' if value == 'all' else value}",
+            reply_markup=_filter_keyboard(),
+        )
 
 
 @router.message(Command("autopost"))
@@ -283,6 +348,8 @@ async def run_bot_async() -> None:
     settings = get_settings()
     if not settings.telegram_bot_token:
         raise RuntimeError("DP_TELEGRAM_BOT_TOKEN is not configured")
+    if not settings.telegram_admin_id_set:
+        raise RuntimeError("DP_TELEGRAM_ADMIN_IDS is not configured")
     bot = Bot(token=settings.telegram_bot_token)
     dispatcher = build_dispatcher()
     try:
