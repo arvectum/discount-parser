@@ -9,7 +9,6 @@ from decimal import Decimal
 from typing import Iterable
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.modules.source_registry.models import (
@@ -122,22 +121,30 @@ def add_keyword(
     normalized = normalize_keyword(keyword)
     if not normalized:
         raise ValueError("keyword is required")
+    merchant_value = merchant.strip() if merchant else None
+    duplicate_query = select(SourceKeyword.id).where(
+        SourceKeyword.normalized_keyword == normalized,
+        SourceKeyword.kind == kind,
+    )
+    if merchant_value is None:
+        duplicate_query = duplicate_query.where(SourceKeyword.merchant.is_(None))
+    else:
+        duplicate_query = duplicate_query.where(SourceKeyword.merchant == merchant_value)
+    if session.scalar(duplicate_query) is not None:
+        raise ValueError("keyword already exists in this scope")
+
     row = SourceKeyword(
         keyword=keyword.strip(),
         normalized_keyword=normalized,
         kind=kind,
         priority=max(0, min(priority, 100)),
-        merchant=merchant.strip() if merchant else None,
+        merchant=merchant_value,
         category=category.strip() if category else None,
         subcategory=subcategory.strip() if subcategory else None,
         enabled=enabled,
     )
     session.add(row)
-    try:
-        session.flush()
-    except IntegrityError as exc:
-        session.rollback()
-        raise ValueError("keyword already exists in this scope") from exc
+    session.flush()
     return row
 
 
