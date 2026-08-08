@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     telegram_default_min_discount: int = 20
     autopost_interval_minutes: int = 30
 
+    # Optional source-collection integrations. They are intentionally separate
+    # from the Telegram publishing bot credentials.
+    telegram_collector_api_id: str | None = None
+    telegram_collector_api_hash: str | None = None
+    telegram_collector_session: str | None = None
+    vk_access_token: str | None = None
+    vk_api_version: str = "5.199"
+
     @property
     def telegram_admin_id_set(self) -> set[int]:
         result: set[int] = set()
