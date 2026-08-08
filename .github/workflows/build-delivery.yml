@@ -78,6 +78,14 @@ jobs:
         working-directory: delivery/app
         run: ./DiscountParser migrate
 
+      - name: Build native Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "packaging\windows\installer.iss"
+          Copy-Item "packaging\windows\output\DiscountParser-Setup.exe" "delivery\DiscountParser-Setup.exe" -Force
+
       - name: Upload delivery package
         uses: actions/upload-artifact@v4
         with:
