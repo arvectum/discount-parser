@@ -6,6 +6,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from src.modules.offers import models as offer_models  # noqa: F401
+from src.modules.source_registry import models as source_registry_models  # noqa: F401
 from src.shared.config import get_settings
 from src.shared.db import Base
 
