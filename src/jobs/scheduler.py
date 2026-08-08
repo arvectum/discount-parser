@@ -11,6 +11,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from src.jobs.lifecycle import maintenance
 from src.shared.config import get_settings
 from src.sources.runner import run_all
+from src.telegram.autopost import run_autopost_cycle
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +37,26 @@ def maintenance_job() -> None:
     logger.info("scheduled_maintenance_finished", extra=result)
 
 
+def autopost_job() -> None:
+    results = run_autopost_cycle()
+    logger.info(
+        "scheduled_autopost_finished",
+        extra={
+            "attempted": len(results),
+            "published": sum(item.status == "published" for item in results),
+            "failed": sum(item.status == "failed" for item in results),
+        },
+    )
+
+
 def build_scheduler(
     *,
     collect_callable: Callable[[], None] = collect_sources_job,
     maintenance_callable: Callable[[], None] = maintenance_job,
+    autopost_callable: Callable[[], None] = autopost_job,
     background: bool = False,
     collect_interval_seconds: float | None = None,
+    autopost_interval_seconds: float | None = None,
 ):
     settings = get_settings()
     scheduler_cls = BackgroundScheduler if background else BlockingScheduler
@@ -49,10 +64,17 @@ def build_scheduler(
 
     if collect_interval_seconds is not None:
         collect_trigger = IntervalTrigger(seconds=collect_interval_seconds)
-        misfire_grace_time = max(1, int(collect_interval_seconds * 3))
+        collect_misfire_grace = max(1, int(collect_interval_seconds * 3))
     else:
         collect_trigger = IntervalTrigger(minutes=settings.collect_interval_minutes)
-        misfire_grace_time = max(60, settings.collect_interval_minutes * 60)
+        collect_misfire_grace = max(60, settings.collect_interval_minutes * 60)
+
+    if autopost_interval_seconds is not None:
+        autopost_trigger = IntervalTrigger(seconds=autopost_interval_seconds)
+        autopost_misfire_grace = max(1, int(autopost_interval_seconds * 3))
+    else:
+        autopost_trigger = IntervalTrigger(minutes=settings.autopost_interval_minutes)
+        autopost_misfire_grace = max(60, settings.autopost_interval_minutes * 60)
 
     scheduler.add_job(
         collect_callable,
@@ -61,16 +83,29 @@ def build_scheduler(
         replace_existing=True,
         max_instances=1,
         coalesce=True,
-        misfire_grace_time=misfire_grace_time,
+        misfire_grace_time=collect_misfire_grace,
     )
     scheduler.add_job(
         maintenance_callable,
-        trigger=CronTrigger(hour=settings.maintenance_hour, minute=settings.maintenance_minute),
+        trigger=CronTrigger(
+            hour=settings.maintenance_hour,
+            minute=settings.maintenance_minute,
+            timezone=settings.timezone,
+        ),
         id="maintenance",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
         misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        autopost_callable,
+        trigger=autopost_trigger,
+        id="autopost",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=autopost_misfire_grace,
     )
     return scheduler
 
