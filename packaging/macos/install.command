@@ -16,7 +16,8 @@ TARGET="$HOME/Applications/DiscountParser"
 mkdir -p "$TARGET"
 
 echo "Installing to $TARGET ..."
-rm -rf "$TARGET"/*
+# Update application files in place. Do not remove the target directory:
+# discount_parser.db and .env are user data and must survive upgrades.
 cp -R "app/." "$TARGET/"
 chmod +x "$TARGET/DiscountParser"
 
