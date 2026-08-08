@@ -3,6 +3,7 @@ name: build-delivery
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags:
       - "v*"
 
