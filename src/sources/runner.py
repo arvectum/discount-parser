@@ -36,8 +36,15 @@ def _ensure_source(session, config: SourceConfig) -> Source:
     else:
         source.name = config.name
         source.base_url = config.base_url
-        source.enabled = config.enabled
     return source
+
+
+def _source_is_enabled(config: SourceConfig) -> bool:
+    with session_scope() as session:
+        source = session.scalar(select(Source).where(Source.key == config.key))
+        if source is None:
+            return config.enabled
+        return bool(source.enabled)
 
 
 def _non_empty(values: dict[str, object]) -> dict[str, object]:
@@ -235,7 +242,7 @@ def run_source(config: SourceConfig) -> RunResult:
 def run_all(path: str = "config/sources.yaml", only: str | None = None) -> list[RunResult]:
     results: list[RunResult] = []
     for config in load_source_configs(path):
-        if not config.enabled:
+        if not _source_is_enabled(config):
             continue
         if only and config.key != only:
             continue
