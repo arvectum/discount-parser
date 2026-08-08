@@ -75,6 +75,10 @@ def collect_registered_source(source_id: int) -> RegistryRunResult:
         if not source.enabled:
             source.status = "disabled"
             return result
+        # Existing promo-code adapters continue through src.sources.runner. The
+        # registry mirrors them for management/discovery without double-fetching.
+        if source.collector_type == "legacy_adapter":
+            return result
         collector_type = source.collector_type
         source_url = source.url
 
@@ -119,6 +123,7 @@ def collect_registered_source(source_id: int) -> RegistryRunResult:
         legacy_source = _legacy_source(session, source)
         keywords = _keywords_for_source(session, source)
         for payload in payloads:
+            item = None
             try:
                 item, created = upsert_source_item(session, source, payload)
                 result.items_created += int(created)
@@ -163,11 +168,9 @@ def collect_registered_source(source_id: int) -> RegistryRunResult:
             except Exception as exc:
                 result.errors += 1
                 result.error = f"{type(exc).__name__}: {exc}"
-                try:
+                if item is not None:
                     item.processing_status = "failed"
                     item.processing_error = result.error[:4000]
-                except UnboundLocalError:
-                    pass
 
         now = datetime.now(UTC)
         source.last_checked_at = now
@@ -186,8 +189,11 @@ def collect_registered_source(source_id: int) -> RegistryRunResult:
 
 def collect_registered_sources(*, only_key: str | None = None) -> list[RegistryRunResult]:
     with session_scope() as session:
-        statement = select(RegisteredSource.id, RegisteredSource.key).where(RegisteredSource.enabled.is_(True))
+        statement = select(RegisteredSource.id).where(
+            RegisteredSource.enabled.is_(True),
+            RegisteredSource.collector_type != "legacy_adapter",
+        )
         if only_key:
             statement = statement.where(RegisteredSource.key == only_key)
-        source_ids = [row.id for row in session.execute(statement).all()]
+        source_ids = list(session.scalars(statement).all())
     return [collect_registered_source(source_id) for source_id in source_ids]
