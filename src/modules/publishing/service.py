@@ -6,7 +6,7 @@ from decimal import Decimal
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
-from src.modules.offers.models import Offer, OfferSourceObservation, Publication, Source
+from src.modules.offers.models import Offer, OfferSourceObservation, Publication, PublishFilter, Source
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +18,18 @@ class PublishCriteria:
     merchant: str | None = None
     source_key: str | None = None
     limit: int = 20
+
+    @classmethod
+    def from_filter(cls, row: PublishFilter) -> "PublishCriteria":
+        return cls(
+            min_discount_percent=row.min_discount_percent,
+            category=row.category,
+            subcategory=row.subcategory,
+            offer_type=row.offer_type,
+            merchant=row.merchant,
+            source_key=row.source_key,
+            limit=row.max_posts_per_cycle,
+        )
 
 
 def list_publish_candidates(
