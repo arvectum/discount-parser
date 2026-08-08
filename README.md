@@ -4,9 +4,9 @@
 
 ## Статус
 
-**MVP v1.0 — R3 Source SDK + first parser slice завершён.**
+**MVP v1.0 — R5 Source pack MVP завершён.**
 
-Следующий этап: **R4 — normalization, deduplication and classification**.
+Следующий этап: **R6 — offer lifecycle + scheduler**.
 
 ## Документация
 
@@ -15,20 +15,27 @@
 - [R1 implementation](docs/R1_IMPLEMENTATION.md)
 - [R2 implementation](docs/R2_IMPLEMENTATION.md)
 - [R3 implementation](docs/R3_IMPLEMENTATION.md)
+- [R4 implementation](docs/R4_IMPLEMENTATION.md)
+- [R5 implementation](docs/R5_IMPLEMENTATION.md)
 
 ## Реализовано
 
-- FastAPI application factory `src.app.create_app`;
-- конфигурация `DP_*`, logging, `/health`, `/health/db`;
+- FastAPI application factory, конфигурация `DP_*`, logging, `/health`, `/health/db`;
 - SQLAlchemy 2.x + SQLite WAL + Alembic `0001`;
 - Offer/Source/provenance/ParseRun/rules/overrides/publications/filters;
-- manual override protection и publication idempotency;
-- Source SDK: `RawOffer`, adapter registry, YAML config, HTTP retries/backoff;
-- первый реальный adapter `promokood`;
-- source runner с isolation ошибок и ParseRun counters;
-- повторный parsing run обновляет observation вместо создания exact duplicate;
+- normalization: canonical URL, benefit values, fingerprint, offer type;
+- cross-source dedup: URL, promo code, fingerprint, RapidFuzz;
+- deterministic taxonomy + DB rules + manual override priority;
+- Source SDK, YAML config, HTTP retries/backoff, source/row failure isolation;
+- 5 enabled adapters:
+  - `promokood` — promokood.ru;
+  - `promokodik` — promokodik.ru;
+  - `berikod` — berikod.ru;
+  - `promokodi_net_ru` — promokodi.net.ru;
+  - `promko` — promko.net;
+- повторный parsing run обновляет Offer/observation вместо создания exact duplicate;
 - CLI для запуска одного или всех источников;
-- pytest fixtures/tests и GitHub Actions CI.
+- deterministic HTML fixtures/tests и GitHub Actions CI.
 
 ## Установка для разработки
 
@@ -81,7 +88,7 @@ DP_TIMEZONE=Europe/Moscow
 DP_DATABASE_URL=sqlite:///./discount_parser.db
 ```
 
-Источники задаются в `config/sources.yaml`.
+Источники задаются в `config/sources.yaml`, taxonomy — в `config/taxonomy.yaml`.
 
 ## Целевой pipeline
 
