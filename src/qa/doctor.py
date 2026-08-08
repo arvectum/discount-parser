@@ -9,6 +9,7 @@ from pathlib import Path
 from src.shared.config import get_settings
 from src.shared.db import check_db_connection
 from src.sources.config import load_source_configs
+from src.sources.registry import build_adapter
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,8 +69,13 @@ def _check_sources() -> DoctorCheck:
     keys = [item.key for item in configs]
     if len(keys) != len(set(keys)):
         return DoctorCheck('sources_config', False, 'В sources.yaml есть дублирующиеся source key')
+    try:
+        for config in configs:
+            build_adapter(config)
+    except Exception as exc:
+        return DoctorCheck('sources_config', False, f'Ошибка adapter registry: {type(exc).__name__}: {exc}')
     enabled = sum(1 for item in configs if item.enabled)
-    return DoctorCheck('sources_config', True, f'источников: {len(configs)}, включено по умолчанию: {enabled}')
+    return DoctorCheck('sources_config', True, f'источников: {len(configs)}, adapters: OK, включено по умолчанию: {enabled}')
 
 
 def _check_telegram() -> DoctorCheck:
