@@ -4,12 +4,15 @@
 
 ## Статус
 
-**MVP v1.0 — R1–R8 реализованы. R9 QA-контур реализуется; live Telegram smoke требует настроенных credentials.**
+**MVP v1.0 — R1–R8 DONE; R9 code/distribution implementation complete.**
+
+Клиентский installer/web UI и cross-platform QA/delivery workflows реализованы. Финальный GitHub Actions execution сейчас блокируется до первого workflow step на уровне runner/account environment, поэтому `CI green` не заявляется. Live acceptance требует целевой машины, реального доступа к источникам и Telegram credentials.
 
 ## Документация
 
 - [Поставка заказчику](docs/CLIENT_DELIVERY_GUIDE.md)
 - [Требования к инфраструктуре](docs/INFRASTRUCTURE_REQUIREMENTS.md)
+- [R9 QA / delivery status](docs/R9_IMPLEMENTATION.md)
 - [Пользовательская инструкция по установке и запуску](docs/USER_INSTALLATION_GUIDE.md)
 - [Техническое задание MVP v1.0](docs/TECHNICAL_SPEC_V1.md)
 - [Дорожная карта](docs/ROADMAP.md)
@@ -32,33 +35,52 @@
 - cross-source dedup: URL, promo code, fingerprint, RapidFuzz;
 - deterministic taxonomy + DB rules + manual override priority;
 - Source SDK, YAML config, HTTP retries/backoff, source/row failure isolation;
-- 5 enabled adapters:
-  - `promokood` — promokood.ru;
-  - `promokodik` — promokodik.ru;
-  - `berikod` — berikod.ru;
-  - `promokodi_net_ru` — promokodi.net.ru;
-  - `promko` — promko.net;
+- 5 adapters: `promokood`, `promokodik`, `berikod`, `promokodi_net_ru`, `promko`;
 - повторный parsing run обновляет Offer/observation вместо создания exact duplicate;
 - APScheduler: collection + maintenance + autopost;
 - lifecycle: explicit expiry и conservative stale review;
-- Telegram control bot на aiogram 3;
-- deny-by-default admin allowlist;
-- `/status`, `/sources`, `/new`, `/queue`, `/filter`, `/autopost`;
-- filter по скидке/category/subcategory/type, service-level merchant/source filters;
-- preview + publish/skip/reject;
-- image → text fallback;
-- publication ledger с `telegram_message_id` и защитой от дублей;
-- XLSX export/import: `active`, `needs_review`, `published`, `expired`, `sources`;
-- `/export` и `/import` в Telegram;
-- manual category/subcategory overrides + conservative exact-title rule memory;
+- Telegram control bot на aiogram 3 и deny-by-default admin allowlist;
+- `/status`, `/sources`, `/new`, `/queue`, `/filter`, `/autopost`, `/export`, `/import`;
+- preview + publish/skip/reject, image → text fallback;
+- publication ledger с schema-valid `pending` reservation, `telegram_message_id` и защитой от дублей;
+- XLSX export/import + manual overrides + exact-title rule memory;
 - локальная web-панель: setup wizard, parser/bot/scheduler controls, schedule, sources, filters, queue, XLSX;
-- web browser предложений с поиском, фильтрами и карточкой Offer;
-- web-журнал последних ParseRun и ошибок источников;
+- browser предложений с поиском, фильтрами, карточкой Offer и provenance;
+- журнал ParseRun и ошибок;
+- System page с process state, PID, bot/scheduler logs и завершением приложения;
+- single-instance web launcher;
 - persisted enabled/disabled состояния источников в SQLite;
-- frozen delivery builds для Windows/macOS и Windows `DiscountParser-Setup.exe`;
+- frozen client delivery: Windows x64, macOS ARM64, macOS Intel;
+- Windows `DiscountParser-Setup.exe`;
+- macOS installer создаёт `Discount Parser.app` и сохраняет DB/settings при update;
 - smoke-report generator для delivery evidence;
 - CLI parse/maintenance/scheduler/bot/run/web/smoke-report;
-- deterministic fixtures/tests и GitHub Actions CI configuration.
+- regression tests и cross-platform GitHub Actions configuration.
+
+## Клиентская установка
+
+Конечному пользователю Python, Git, pip и virtualenv не нужны.
+
+Windows:
+
+```text
+DiscountParser-Setup.exe
+```
+
+macOS:
+
+```text
+discount-parser-macos-arm64
+discount-parser-macos-intel
+```
+
+После установки пользователь запускает `Discount Parser` / `Discount Parser.app`. Браузер открывает локальную панель на:
+
+```text
+http://127.0.0.1:8765
+```
+
+На первом запуске web wizard запрашивает Telegram Bot Token, канал и Telegram user ID администратора. `.env` создаётся приложением автоматически.
 
 ## Установка для разработки
 
@@ -74,17 +96,13 @@ cp .env.example .env
 alembic upgrade head
 ```
 
-Конечному пользователю development-установка не требуется: delivery-сборка содержит Python runtime и устанавливается отдельным installer/package.
-
-## Запуск
+## Запуск для разработки
 
 Web control panel:
 
 ```bash
 python -m src.cli web
 ```
-
-По умолчанию панель открывается локально на `http://127.0.0.1:8765`.
 
 API:
 
@@ -130,45 +148,15 @@ python -m src.cli smoke-report --output output/smoke_report.json
 ```bash
 python -m compileall -q src tests
 python -m pytest
-curl http://127.0.0.1:8000/health
-curl http://127.0.0.1:8000/health/db
-curl http://127.0.0.1:8000/health/sources
+alembic upgrade head
+python -m src.cli smoke-report
 ```
-
-Swagger доступен по `/docs`.
-
-## Основная конфигурация
-
-```dotenv
-DP_APP_NAME=Discount Parser API
-DP_ENV=local
-DP_DEBUG=false
-DP_HOST=127.0.0.1
-DP_PORT=8000
-DP_WEB_PORT=8765
-DP_LOG_LEVEL=INFO
-DP_LOG_FORMAT=plain
-DP_TIMEZONE=Europe/Moscow
-DP_DATABASE_URL=sqlite:///./discount_parser.db
-DP_SOURCES_CONFIG_PATH=config/sources.yaml
-DP_COLLECT_INTERVAL_MINUTES=120
-DP_MAINTENANCE_HOUR=22
-DP_MAINTENANCE_MINUTE=0
-DP_STALE_AFTER_DAYS=7
-DP_TELEGRAM_BOT_TOKEN=replace_me
-DP_TELEGRAM_CHANNEL_ID=@replace_me
-DP_TELEGRAM_ADMIN_IDS=123456789
-DP_TELEGRAM_DEFAULT_MIN_DISCOUNT=20
-DP_AUTOPOST_INTERVAL_MINUTES=30
-```
-
-В клиентской версии Telegram и operational settings настраиваются через web UI, а не вручную через `.env`.
 
 ## Инфраструктура
 
-Для текущего локального сценария отдельный сервер не нужен. Приложение может работать на обычном ноутбуке Windows/macOS с интернетом. SQLite, web UI, scheduler и Telegram polling работают локально.
+Для локального сценария отдельный сервер не нужен. Приложение работает на обычном ноутбуке Windows/macOS с интернетом; SQLite, web UI, scheduler и Telegram polling работают локально.
 
-Автоматическая работа продолжается только пока ноутбук включён, не находится в sleep/hibernation и запущен Discount Parser. Для режима 24/7 приложение можно перенести на небольшой постоянно включённый ПК/VPS без изменения основной логики. Подробности: [требования к инфраструктуре](docs/INFRASTRUCTURE_REQUIREMENTS.md).
+Автоматизация работает, пока ноутбук включён, не находится в sleep/hibernation, имеет интернет и запущен Discount Parser. Для режима 24/7 достаточно небольшой постоянно включённой машины/VPS. Подробности: [docs/INFRASTRUCTURE_REQUIREMENTS.md](docs/INFRASTRUCTURE_REQUIREMENTS.md).
 
 ## Pipeline
 
@@ -197,5 +185,3 @@ publication ledger
   ↓
 XLSX correction / rule memory
 ```
-
-Реализация ведётся по этапам `R1–R9` из дорожной карты.
