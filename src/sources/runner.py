@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.core.classification import classify_offer
 from src.core.dedup import find_existing_offer
@@ -195,9 +195,18 @@ def run_source(config: SourceConfig) -> RunResult:
         parse_run.new_count = result.created
         parse_run.updated_count = result.updated
         parse_run.duplicate_count = result.updated
-        parse_run.review_count = session.scalar(
-            select(Offer).where(Offer.status == "needs_review").with_only_columns(Offer.id).limit(1)
-        ) is not None
+        parse_run.review_count = int(
+            session.scalar(
+                select(func.count(func.distinct(Offer.id)))
+                .join(OfferSourceObservation, OfferSourceObservation.offer_id == Offer.id)
+                .where(
+                    OfferSourceObservation.source_id == source.id,
+                    OfferSourceObservation.observed_at >= parse_run.started_at,
+                    Offer.status == "needs_review",
+                )
+            )
+            or 0
+        )
         parse_run.error_count = result.errors
         parse_run.error = "\n".join(errors)[:10000] if errors else None
         parse_run.status = "partial" if errors else "success"
