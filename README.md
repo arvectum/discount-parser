@@ -4,26 +4,31 @@
 
 ## Статус
 
-**MVP v1.0 — R1 Project foundation завершён.**
+**MVP v1.0 — R2 Offer domain + persistence завершён.**
 
-Следующий этап: **R2 — Offer domain + persistence**.
+Следующий этап: **R3 — Source SDK + first end-to-end parser slice**.
 
 ## Документация
 
 - [Техническое задание MVP v1.0](docs/TECHNICAL_SPEC_V1.md)
 - [Дорожная карта](docs/ROADMAP.md)
+- [R1 implementation](docs/R1_IMPLEMENTATION.md)
+- [R2 implementation](docs/R2_IMPLEMENTATION.md)
 
-## Реализовано в R1
+## Реализовано
 
 - FastAPI application factory `src.app.create_app`;
 - ASGI entry point `src.main:app`;
 - конфигурация `DP_*` через pydantic-settings;
 - plain/JSON logging foundation;
-- `GET /health`;
-- pytest setup и базовые тесты;
-- структура `src/app`, `src/shared`, `src/modules`.
-
-Persistence, source adapters и Telegram относятся к следующим этапам roadmap.
+- `GET /health` и `GET /health/db`;
+- SQLAlchemy 2.x persistence;
+- SQLite WAL + foreign keys + busy timeout;
+- Alembic schema revision `0001`;
+- доменные сущности Offer/Source/provenance/ParseRun/rules/overrides/publications/filters;
+- manual override protection;
+- publication idempotency constraint;
+- pytest persistence tests и GitHub Actions CI.
 
 ## Установка для разработки
 
@@ -36,6 +41,7 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -e ".[dev]"
 cp .env.example .env
+alembic upgrade head
 ```
 
 ## Запуск
@@ -48,9 +54,10 @@ uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
 
 ```bash
 curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/health/db
 ```
 
-`/health` возвращает `status=ok`. Swagger доступен по `/docs`.
+Swagger доступен по `/docs`.
 
 ## Тесты
 
@@ -71,9 +78,8 @@ DP_PORT=8000
 DP_LOG_LEVEL=INFO
 DP_LOG_FORMAT=plain
 DP_TIMEZONE=Europe/Moscow
+DP_DATABASE_URL=sqlite:///./discount_parser.db
 ```
-
-`DP_LOG_FORMAT` поддерживает `plain` и `json`.
 
 ## Целевой pipeline
 
@@ -96,15 +102,5 @@ Telegram bot
   ↓
 Telegram channel
 ```
-
-## Основные принципы
-
-- подключаемые адаптеры вместо монолитного парсера;
-- SQLite является source of truth, XLSX/CSV — экспортом и интерфейсом ручной корректировки;
-- истёкшие предложения сохраняются в истории;
-- повторный парсинг и повторные jobs должны быть идемпотентными;
-- ручные корректировки имеют приоритет над автоматической классификацией;
-- ошибка одного источника не останавливает остальные;
-- первая версия не зависит от LLM и не пытается обходить CAPTCHA/anti-bot.
 
 Реализация ведётся по этапам `R1–R9` из дорожной карты.
