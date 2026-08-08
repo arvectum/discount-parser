@@ -1,0 +1,1 @@
+"""Discount Parser application package."""
