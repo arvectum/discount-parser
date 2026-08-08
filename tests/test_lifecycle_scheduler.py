@@ -127,6 +127,11 @@ def test_accelerated_scheduler_executes_collection_job(monkeypatch: pytest.Monke
         background=True,
         collect_interval_seconds=0.1,
     )
+    jobs = {job.id: job for job in scheduler.get_jobs()}
+    assert set(jobs) == {"collect_sources", "maintenance"}
+    assert jobs["collect_sources"].max_instances == 1
+    assert jobs["maintenance"].max_instances == 1
+
     scheduler.start()
     try:
         time.sleep(0.28)
@@ -135,5 +140,3 @@ def test_accelerated_scheduler_executes_collection_job(monkeypatch: pytest.Monke
         get_settings.cache_clear()
 
     assert len(calls) >= 2
-    jobs = {job.id: job for job in scheduler.get_jobs()}
-    assert jobs == {}
