@@ -8,6 +8,7 @@
 
 ## Документация
 
+- [Пользовательская инструкция по установке и запуску](docs/USER_INSTALLATION_GUIDE.md)
 - [Техническое задание MVP v1.0](docs/TECHNICAL_SPEC_V1.md)
 - [Дорожная карта](docs/ROADMAP.md)
 - [R1 implementation](docs/R1_IMPLEMENTATION.md)
