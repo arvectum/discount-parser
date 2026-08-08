@@ -8,6 +8,11 @@ from src.qa import doctor
 from src.shared.config import get_settings
 
 
+def _stub_registry_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(doctor, '_check_source_registry', lambda: doctor.DoctorCheck('source_registry', True, 'ok'))
+    monkeypatch.setattr(doctor, '_check_social_credentials', lambda: doctor.DoctorCheck('social_credentials', True, 'ok', required=False))
+
+
 def test_doctor_optional_telegram_does_not_fail_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sources = tmp_path / 'sources.yaml'
     sources.write_text(
@@ -20,6 +25,7 @@ def test_doctor_optional_telegram_does_not_fail_report(tmp_path: Path, monkeypat
     monkeypatch.delenv('DP_TELEGRAM_CHANNEL_ID', raising=False)
     monkeypatch.delenv('DP_TELEGRAM_ADMIN_IDS', raising=False)
     monkeypatch.setattr(doctor, 'check_db_connection', lambda: True)
+    _stub_registry_checks(monkeypatch)
     get_settings.cache_clear()
     try:
         report = doctor.build_doctor_report(check_web_port=False)
@@ -35,6 +41,7 @@ def test_doctor_fails_on_missing_sources(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setenv('DP_DATABASE_URL', f"sqlite:///{tmp_path / 'doctor.db'}")
     monkeypatch.setenv('DP_SOURCES_CONFIG_PATH', str(tmp_path / 'missing.yaml'))
     monkeypatch.setattr(doctor, 'check_db_connection', lambda: True)
+    _stub_registry_checks(monkeypatch)
     get_settings.cache_clear()
     try:
         report = doctor.build_doctor_report(check_web_port=False)
@@ -54,6 +61,7 @@ def test_doctor_fails_on_unknown_adapter(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setenv('DP_DATABASE_URL', f"sqlite:///{tmp_path / 'doctor.db'}")
     monkeypatch.setenv('DP_SOURCES_CONFIG_PATH', str(sources))
     monkeypatch.setattr(doctor, 'check_db_connection', lambda: True)
+    _stub_registry_checks(monkeypatch)
     get_settings.cache_clear()
     try:
         report = doctor.build_doctor_report(check_web_port=False)
@@ -68,6 +76,7 @@ def test_doctor_report_json_is_serializable(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(doctor, '_check_database', lambda: doctor.DoctorCheck('database', True, 'ok'))
     monkeypatch.setattr(doctor, '_check_writable_directory', lambda _path: doctor.DoctorCheck('data_directory', True, 'ok'))
     monkeypatch.setattr(doctor, '_check_sources', lambda: doctor.DoctorCheck('sources_config', True, 'ok'))
+    _stub_registry_checks(monkeypatch)
     monkeypatch.setattr(doctor, '_check_telegram', lambda: doctor.DoctorCheck('telegram_config', True, 'ok', required=False))
     report = doctor.build_doctor_report(check_web_port=False)
     text = report.to_json()
