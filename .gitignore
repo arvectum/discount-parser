@@ -6,10 +6,13 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Environments
+# Environments / secrets
 .venv/
 venv/
 .env
+*.session
+*.session-journal
+telegram*.session*
 
 # IDE / OS
 .DS_Store
@@ -23,3 +26,12 @@ venv/
 logs/
 data/runtime/
 output/
+
+# Local packaging
+build/
+build-*/
+dist/
+dist-*/
+delivery/
+*.spec
+packaging/windows/output/
