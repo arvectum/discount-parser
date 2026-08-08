@@ -101,6 +101,11 @@ def test_initial_alembic_migration_creates_expected_tables(tmp_path: Path, monke
         "manual_overrides",
         "publications",
         "publish_filters",
+        "registered_sources",
+        "source_keywords",
+        "source_candidates",
+        "source_keyword_links",
+        "source_items",
         "alembic_version",
     } <= tables
 
