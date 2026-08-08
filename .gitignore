@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+venv/
+.env
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+logs/
+data/runtime/
+output/
