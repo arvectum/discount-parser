@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     debug: bool = False
     host: str = "127.0.0.1"
     port: int = 8000
+    web_port: int = 8765
     log_level: str = "INFO"
     log_format: str = "plain"
     timezone: str = "Europe/Moscow"
@@ -28,6 +29,7 @@ class Settings(BaseSettings):
     stale_after_days: int = 7
 
     telegram_bot_token: str | None = None
+    telegram_bot_name: str | None = None
     telegram_channel_id: str | None = None
     telegram_admin_ids: str = ""
     telegram_default_min_discount: int = 20
@@ -41,6 +43,14 @@ class Settings(BaseSettings):
             if item:
                 result.add(int(item))
         return result
+
+    @property
+    def setup_complete(self) -> bool:
+        return bool(
+            self.telegram_bot_token
+            and self.telegram_channel_id
+            and self.telegram_admin_id_set
+        )
 
 
 @lru_cache
