@@ -56,21 +56,24 @@ def resolve_offer_type(raw: RawOffer) -> str:
     text = normalize_text(f"{raw.title} {raw.description or ''}")
     if raw.promo_code:
         return "promo"
-    if "кэшб" in text or "кешб" in text or "cashback" in text:
+    if raw.cashback_percent is not None or raw.cashback_amount is not None or "кэшб" in text or "кешб" in text or "cashback" in text:
         return "cashback"
-    if "доставк" in text and ("бесплат" in text or raw.discount_amount is not None):
+    if raw.delivery_price is not None or ("доставк" in text and "бесплат" in text):
         return "delivery"
     return "discount"
 
 
-def build_fingerprint(*, merchant: str | None, title: str, promo_code: str | None, discount_percent: Decimal | None, discount_amount: Decimal | None) -> str:
+def build_fingerprint(
+    *, merchant: str | None, title: str, promo_code: str | None,
+    discount_percent: Decimal | None, discount_amount: Decimal | None,
+    cashback_percent: Decimal | None, cashback_amount: Decimal | None,
+    delivery_price: Decimal | None,
+) -> str:
     payload = "|".join(
         [
-            normalize_text(merchant),
-            normalize_text(title),
-            normalize_text(promo_code),
-            str(discount_percent or ""),
-            str(discount_amount or ""),
+            normalize_text(merchant), normalize_text(title), normalize_text(promo_code),
+            str(discount_percent or ""), str(discount_amount or ""),
+            str(cashback_percent or ""), str(cashback_amount or ""), str(delivery_price or ""),
         ]
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -80,11 +83,15 @@ def build_fingerprint(*, merchant: str | None, title: str, promo_code: str | Non
 class NormalizedOffer:
     title: str
     merchant: str | None
+    brand: str | None
     promo_code: str | None
     discount_percent: Decimal | None
     discount_amount: Decimal | None
     old_price: Decimal | None
     new_price: Decimal | None
+    cashback_percent: Decimal | None
+    cashback_amount: Decimal | None
+    delivery_price: Decimal | None
     canonical_url: str | None
     offer_type: str
     fingerprint: str
@@ -95,17 +102,25 @@ def normalize_raw_offer(raw: RawOffer) -> NormalizedOffer:
     new_price = decimal_or_none(raw.new_price)
     discount_percent = decimal_or_none(raw.discount_percent) or compute_discount_percent(old_price, new_price)
     discount_amount = decimal_or_none(raw.discount_amount)
+    cashback_percent = decimal_or_none(raw.cashback_percent)
+    cashback_amount = decimal_or_none(raw.cashback_amount)
+    delivery_price = decimal_or_none(raw.delivery_price)
     merchant = re.sub(r"\s+", " ", (raw.merchant or "").strip()) or None
+    brand = re.sub(r"\s+", " ", (raw.brand or "").strip()) or None
     title = re.sub(r"\s+", " ", raw.title.strip())
     promo_code = raw.promo_code.strip().upper() if raw.promo_code else None
     return NormalizedOffer(
         title=title,
         merchant=merchant,
+        brand=brand,
         promo_code=promo_code,
         discount_percent=discount_percent,
         discount_amount=discount_amount,
         old_price=old_price,
         new_price=new_price,
+        cashback_percent=cashback_percent,
+        cashback_amount=cashback_amount,
+        delivery_price=delivery_price,
         canonical_url=canonicalize_url(raw.source_url),
         offer_type=resolve_offer_type(raw),
         fingerprint=build_fingerprint(
@@ -114,5 +129,8 @@ def normalize_raw_offer(raw: RawOffer) -> NormalizedOffer:
             promo_code=promo_code,
             discount_percent=discount_percent,
             discount_amount=discount_amount,
+            cashback_percent=cashback_percent,
+            cashback_amount=cashback_amount,
+            delivery_price=delivery_price,
         ),
     )
