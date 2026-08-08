@@ -12,10 +12,12 @@ from src.web.app import app
 from src.web.management_pages import router as management_router
 from src.web.processes import process_manager
 from src.web.setup import is_setup_complete
+from src.web.source_registry_static_routes import router as source_registry_static_router
 from src.web.source_registry_routes import router as source_registry_router
 from src.web.system_routes import router as system_router
 
 app.include_router(management_router)
+app.include_router(source_registry_static_router)
 app.include_router(source_registry_router)
 app.include_router(system_router)
 
