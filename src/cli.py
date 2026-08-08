@@ -6,6 +6,7 @@ from dataclasses import asdict
 
 from src.jobs.lifecycle import maintenance
 from src.jobs.scheduler import run_scheduler
+from src.qa.doctor import build_doctor_report
 from src.qa.report import write_smoke_report
 from src.runtime import run_all as run_runtime
 from src.shared.config import get_settings
@@ -27,6 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("bot", help="Run Telegram control bot")
     subparsers.add_parser("run", help="Run Telegram bot and scheduler together")
     subparsers.add_parser("web", help="Open local web control panel")
+    subparsers.add_parser("doctor", help="Run local preflight checks before live testing")
 
     report_cmd = subparsers.add_parser("smoke-report", help="Write JSON delivery evidence from the current database")
     report_cmd.add_argument("--output", default="output/smoke_report.json", help="Destination JSON path")
@@ -62,6 +64,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "web":
         run_web_panel()
         return 0
+
+    if args.command == "doctor":
+        report = build_doctor_report()
+        print(report.to_json())
+        return 0 if report.ok else 1
 
     if args.command == "smoke-report":
         path = write_smoke_report(args.output)
