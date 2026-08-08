@@ -39,6 +39,9 @@ class HttpCollectorBase:
     policy = HttpPolicy()
 
     def _get(self, url: str) -> httpx.Response:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise CollectorError("collector URL must be an absolute http(s) URL")
         with httpx.Client(
             follow_redirects=True,
             timeout=self.policy.timeout_seconds,
@@ -101,7 +104,16 @@ class GenericWebCollector(HttpCollectorBase):
 
 
 class PublicPageCollector(GenericWebCollector):
-    """Metadata/text fallback for a known public Dzen/other page."""
+    """Metadata/text fallback for a known public page."""
+
+
+class DzenPublicCollector(PublicPageCollector):
+    """Known Dzen channel/publication page collector.
+
+    Dzen's public web surface is intentionally treated as a compatibility
+    collector. Live acceptance may replace internals with a stable public JSON or
+    RSS surface without changing the persisted collector contract.
+    """
 
 
 class TelegramPublicCollector(HttpCollectorBase):
@@ -111,8 +123,6 @@ class TelegramPublicCollector(HttpCollectorBase):
     Private channels and channels unavailable through /s require a separate
     authenticated collector.
     """
-
-    _MESSAGE_RE = re.compile(r"data-post=[\"']([^\"']+)[\"']")
 
     def collect(self, source: RegisteredSource) -> list[ItemPayload]:
         parsed = urlparse(source.url)
@@ -175,7 +185,7 @@ class VkApiCollector(HttpCollectorBase):
 
     def collect(self, source: RegisteredSource) -> list[ItemPayload]:
         settings = get_settings()
-        token = getattr(settings, "vk_access_token", None)
+        token = settings.vk_access_token
         if not token:
             raise CredentialsRequired("VK collector requires DP_VK_ACCESS_TOKEN")
         owner_id = source.external_id
@@ -183,7 +193,7 @@ class VkApiCollector(HttpCollectorBase):
             raise CollectorError("VK source requires external_id (owner_id/domain)")
         params = {
             "access_token": token,
-            "v": getattr(settings, "vk_api_version", "5.199"),
+            "v": settings.vk_api_version,
             "count": min(self.policy.max_items, 100),
         }
         if owner_id.lstrip("-").isdigit():
@@ -260,6 +270,7 @@ class RutubePublicCollector(HttpCollectorBase):
 COLLECTORS: dict[str, type[SourceCollector]] = {
     "generic_web": GenericWebCollector,
     "public_page": PublicPageCollector,
+    "dzen_public": DzenPublicCollector,
     "telegram_public": TelegramPublicCollector,
     "vk_api": VkApiCollector,
     "rutube_public": RutubePublicCollector,
