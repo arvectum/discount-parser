@@ -8,7 +8,7 @@ from src.jobs.lifecycle import maintenance
 from src.jobs.scheduler import run_scheduler
 from src.shared.config import get_settings
 from src.sources.runner import run_all
-from src.telegram.bot import run_bot
+from src.telegram.runner import run_bot
 
 
 def build_parser() -> argparse.ArgumentParser:
