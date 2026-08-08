@@ -63,6 +63,14 @@ def test_publication_is_unique_per_offer_and_channel(sqlite_db: Path) -> None:
         session.rollback()
 
 
+def test_offer_status_constraint_rejects_unknown_value(sqlite_db: Path) -> None:
+    with create_session() as session:
+        session.add(Offer(title="Broken", status="not-a-status"))
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+
 def test_sqlite_runtime_pragmas(sqlite_db: Path) -> None:
     with get_engine().connect() as connection:
         journal_mode = connection.execute(text("PRAGMA journal_mode")).scalar_one()
