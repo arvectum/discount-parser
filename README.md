@@ -4,9 +4,9 @@
 
 ## Статус
 
-**MVP v1.0 — R2 Offer domain + persistence завершён.**
+**MVP v1.0 — R3 Source SDK + first parser slice завершён.**
 
-Следующий этап: **R3 — Source SDK + first end-to-end parser slice**.
+Следующий этап: **R4 — normalization, deduplication and classification**.
 
 ## Документация
 
@@ -14,21 +14,21 @@
 - [Дорожная карта](docs/ROADMAP.md)
 - [R1 implementation](docs/R1_IMPLEMENTATION.md)
 - [R2 implementation](docs/R2_IMPLEMENTATION.md)
+- [R3 implementation](docs/R3_IMPLEMENTATION.md)
 
 ## Реализовано
 
 - FastAPI application factory `src.app.create_app`;
-- ASGI entry point `src.main:app`;
-- конфигурация `DP_*` через pydantic-settings;
-- plain/JSON logging foundation;
-- `GET /health` и `GET /health/db`;
-- SQLAlchemy 2.x persistence;
-- SQLite WAL + foreign keys + busy timeout;
-- Alembic schema revision `0001`;
-- доменные сущности Offer/Source/provenance/ParseRun/rules/overrides/publications/filters;
-- manual override protection;
-- publication idempotency constraint;
-- pytest persistence tests и GitHub Actions CI.
+- конфигурация `DP_*`, logging, `/health`, `/health/db`;
+- SQLAlchemy 2.x + SQLite WAL + Alembic `0001`;
+- Offer/Source/provenance/ParseRun/rules/overrides/publications/filters;
+- manual override protection и publication idempotency;
+- Source SDK: `RawOffer`, adapter registry, YAML config, HTTP retries/backoff;
+- первый реальный adapter `promokood`;
+- source runner с isolation ошибок и ParseRun counters;
+- повторный parsing run обновляет observation вместо создания exact duplicate;
+- CLI для запуска одного или всех источников;
+- pytest fixtures/tests и GitHub Actions CI.
 
 ## Установка для разработки
 
@@ -44,30 +44,30 @@ cp .env.example .env
 alembic upgrade head
 ```
 
-## Запуск
+## Запуск API
 
 ```bash
 uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Проверка:
+## Запуск парсера
 
 ```bash
+python -m src.cli parse
+python -m src.cli parse --source promokood
+```
+
+## Проверки
+
+```bash
+python -m pytest
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/health/db
 ```
 
 Swagger доступен по `/docs`.
 
-## Тесты
-
-```bash
-python -m pytest
-```
-
 ## Конфигурация
-
-См. `.env.example`. Основные параметры:
 
 ```dotenv
 DP_APP_NAME=Discount Parser API
@@ -80,6 +80,8 @@ DP_LOG_FORMAT=plain
 DP_TIMEZONE=Europe/Moscow
 DP_DATABASE_URL=sqlite:///./discount_parser.db
 ```
+
+Источники задаются в `config/sources.yaml`.
 
 ## Целевой pipeline
 
