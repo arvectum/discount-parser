@@ -42,6 +42,11 @@ def _data_directory() -> Path:
     return Path('.')
 
 
+def _check_database() -> DoctorCheck:
+    ok = check_db_connection()
+    return DoctorCheck('database', ok, 'подключение к БД успешно' if ok else 'подключение к БД не удалось')
+
+
 def _check_writable_directory(path: Path) -> DoctorCheck:
     try:
         path.mkdir(parents=True, exist_ok=True)
@@ -74,7 +79,11 @@ def _check_telegram() -> DoctorCheck:
         missing.append('bot token')
     if not settings.telegram_channel_id:
         missing.append('channel')
-    if not settings.telegram_admin_id_set:
+    try:
+        admin_ids = settings.telegram_admin_id_set
+    except ValueError:
+        return DoctorCheck('telegram_config', False, 'admin ID содержит нечисловое значение', required=False)
+    if not admin_ids:
         missing.append('admin ID')
     if missing:
         return DoctorCheck('telegram_config', False, 'не заполнено: ' + ', '.join(missing), required=False)
@@ -96,7 +105,7 @@ def _check_web_port() -> DoctorCheck:
 
 def build_doctor_report(*, check_web_port: bool = True) -> DoctorReport:
     checks: list[DoctorCheck] = [
-        DoctorCheck('database', check_db_connection(), 'подключение к БД успешно' if check_db_connection() else 'подключение к БД не удалось'),
+        _check_database(),
         _check_writable_directory(_data_directory()),
         _check_sources(),
         _check_telegram(),
