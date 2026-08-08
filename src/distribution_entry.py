@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import sys
+from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
@@ -10,11 +12,21 @@ from src.telegram.runner import run_bot
 from src.web.launcher import run_web_panel
 
 
+def _prepare_runtime_directory() -> Path:
+    if getattr(sys, 'frozen', False):
+        root = Path(sys.executable).resolve().parent
+        os.chdir(root)
+        return root
+    return Path.cwd()
+
+
 def migrate() -> None:
+    _prepare_runtime_directory()
     command.upgrade(Config('alembic.ini'), 'head')
 
 
 def main() -> int:
+    _prepare_runtime_directory()
     command_name = sys.argv[1] if len(sys.argv) > 1 else 'web'
     if command_name == 'web':
         run_web_panel()
