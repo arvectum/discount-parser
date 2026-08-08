@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import socket
 import sys
 import threading
 import time
@@ -12,9 +13,18 @@ from src.web.processes import process_manager
 from src.web.setup import is_setup_complete
 
 
-def _open_browser(url: str) -> None:
-    time.sleep(1.0)
+def _open_browser(url: str, *, delay: float = 1.0) -> None:
+    if delay > 0:
+        time.sleep(delay)
     webbrowser.open(url)
+
+
+def _panel_is_running(port: int) -> bool:
+    try:
+        with socket.create_connection(('127.0.0.1', port), timeout=0.35):
+            return True
+    except OSError:
+        return False
 
 
 def _autostart_packaged_services() -> None:
@@ -31,6 +41,13 @@ def _autostart_packaged_services() -> None:
 def run_web_panel() -> None:
     settings = get_settings()
     url = f'http://127.0.0.1:{settings.web_port}'
+
+    # A repeated click on the desktop shortcut should focus/open the existing
+    # local panel instead of starting a second web server and service set.
+    if _panel_is_running(settings.web_port):
+        _open_browser(url, delay=0)
+        return
+
     _autostart_packaged_services()
     threading.Thread(target=_open_browser, args=(url,), daemon=True).start()
 
