@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from src.qa.doctor import DoctorCheck, DoctorReport
 from src.web.application import app
-from src.web import launcher, system_routes
+from src.web import launcher, processes, system_routes
 
 
 def test_system_routes_are_registered() -> None:
@@ -52,3 +54,14 @@ def test_repeated_web_launch_only_opens_existing_panel(monkeypatch) -> None:
 
     assert opened
     assert opened[0].startswith('http://127.0.0.1:')
+
+
+def test_frozen_windows_services_use_worker_executable(tmp_path: Path, monkeypatch) -> None:
+    worker = tmp_path / 'DiscountParserWorker.exe'
+    worker.write_bytes(b'worker')
+    monkeypatch.setattr(processes, 'ROOT', tmp_path)
+    monkeypatch.setattr(processes.sys, 'platform', 'win32')
+    monkeypatch.setattr(processes.sys, 'frozen', True, raising=False)
+
+    assert processes.ProcessManager._command('bot') == [str(worker), 'bot']
+    assert processes.ProcessManager._command('scheduler') == [str(worker), 'scheduler']
