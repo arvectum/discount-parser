@@ -110,3 +110,24 @@ def test_publisher_sends_once_and_records_message(sqlite_db: Path) -> None:
         assert publication.status == "published"
         assert publication.telegram_message_id == "101"
         assert offer.status == "published"
+
+
+def test_publisher_refuses_non_ready_offer_without_reservation(sqlite_db: Path) -> None:
+    with create_session() as session:
+        offer = Offer(
+            title="Expired deal",
+            status="expired",
+            discount_percent=Decimal("40"),
+        )
+        session.add(offer)
+        session.commit()
+        offer_id = offer.id
+
+    bot = FakeBot()
+    result = asyncio.run(publish_offer(bot, offer_id=offer_id, channel_id="@channel"))
+
+    assert result.status == "not_publishable"
+    assert bot.messages == []
+    assert bot.photos == []
+    with create_session() as session:
+        assert session.scalar(select(func.count()).select_from(Publication)) == 0
