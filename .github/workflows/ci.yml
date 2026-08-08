@@ -52,4 +52,5 @@ jobs:
           python -m src.cli maintenance --help
           python -m src.cli scheduler --help
           python -m src.cli bot --help
+          python -m src.cli run --help
           python -m src.cli smoke-report --help
