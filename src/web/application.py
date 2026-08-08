@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse
+from starlette.responses import PlainTextResponse, Response
 
 from src.web.app import app
 from src.web.management_pages import router as management_router
@@ -28,7 +28,7 @@ def _is_local_url(value: str) -> bool:
         return False
 
 
-class LocalOriginMiddleware(BaseHTTPMiddleware):
+class LocalControlMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method in _MUTATING_METHODS:
             origin = request.headers.get('origin')
@@ -56,10 +56,28 @@ class LocalOriginMiddleware(BaseHTTPMiddleware):
                 except Exception:
                     # The System page exposes state/logs and allows retry.
                     pass
-        return response
+
+        if request.url.path != '/' or response.headers.get('content-type', '').split(';')[0] != 'text/html':
+            return response
+
+        body = b''
+        async for chunk in response.body_iterator:
+            body += chunk
+        text = body.decode('utf-8')
+        if '<div class="wrap">' in text and 'href="/offers"' not in text:
+            nav = '''<div class="row" style="margin:0 0 18px">
+              <a class="btn secondary" href="/">Главная</a>
+              <a class="btn secondary" href="/offers">Предложения</a>
+              <a class="btn secondary" href="/runs">Журнал</a>
+              <a class="btn secondary" href="/system">Система</a>
+            </div>'''
+            text = text.replace('<div class="wrap">', '<div class="wrap">' + nav, 1)
+        headers = dict(response.headers)
+        headers.pop('content-length', None)
+        return Response(content=text, status_code=response.status_code, headers=headers, media_type='text/html')
 
 
-app.add_middleware(LocalOriginMiddleware)
+app.add_middleware(LocalControlMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=['127.0.0.1', 'localhost', '[::1]', 'testserver'])
 
 __all__ = ['app']
