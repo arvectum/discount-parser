@@ -35,6 +35,12 @@ class ProcessManager:
     def states(self) -> dict[str, ProcessState]:
         return {name: self.state(name) for name in ('bot', 'scheduler')}
 
+    @staticmethod
+    def _command(name: str) -> list[str]:
+        if getattr(sys, 'frozen', False):
+            return [sys.executable, name]
+        return [sys.executable, '-m', 'src.cli', name]
+
     def start(self, name: str) -> ProcessState:
         if name not in {'bot', 'scheduler'}:
             raise ValueError(f'Unsupported process: {name}')
@@ -48,13 +54,8 @@ class ProcessManager:
             if sys.platform == 'win32':
                 creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
-            if getattr(sys, 'frozen', False):
-                command = [sys.executable, name]
-            else:
-                command = [sys.executable, '-m', 'src.cli', name]
-
             process = subprocess.Popen(
-                command,
+                self._command(name),
                 cwd=ROOT,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
