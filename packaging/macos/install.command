@@ -26,19 +26,29 @@ echo "Preparing database..."
 ./DiscountParser migrate
 popd >/dev/null
 
-DESKTOP="$HOME/Desktop"
-SHORTCUT="$DESKTOP/Discount Parser.command"
-mkdir -p "$DESKTOP"
-cat > "$SHORTCUT" <<EOF
-#!/bin/bash
-cd $(printf '%q' "$TARGET")
-exec ./DiscountParser
+# Build a tiny native-looking .app launcher. It starts the frozen runtime in
+# the background so ordinary launches do not open a Terminal window.
+LAUNCHER_APP="$HOME/Applications/Discount Parser.app"
+rm -rf "$LAUNCHER_APP"
+APPLE_SCRIPT="$(mktemp -t discount-parser-launcher).applescript"
+TARGET_ESCAPED=$(printf '%q' "$TARGET")
+cat > "$APPLE_SCRIPT" <<EOF
+on run
+    do shell script "cd $TARGET_ESCAPED && nohup ./DiscountParser >/dev/null 2>&1 &"
+end run
 EOF
-chmod +x "$SHORTCUT"
+osacompile -o "$LAUNCHER_APP" "$APPLE_SCRIPT"
+rm -f "$APPLE_SCRIPT"
+
+DESKTOP="$HOME/Desktop"
+DESKTOP_APP="$DESKTOP/Discount Parser.app"
+mkdir -p "$DESKTOP"
+rm -rf "$DESKTOP_APP"
+ln -s "$LAUNCHER_APP" "$DESKTOP_APP"
 
 echo
 echo "Installation completed."
-echo "Use 'Discount Parser.command' on the Desktop."
+echo "Use 'Discount Parser.app' on the Desktop."
 echo "On first launch the browser will open the setup wizard."
 echo
 read -r -p "Press Enter to close..."
