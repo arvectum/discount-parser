@@ -6,7 +6,11 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 
+from src.core.classification import classify_offer
+from src.core.dedup import find_existing_offer
+from src.core.normalization import normalize_raw_offer
 from src.modules.offers.models import Offer, OfferSourceObservation, ParseRun, Source
+from src.modules.offers.repository import OfferRepository
 from src.shared.db import session_scope
 from src.sources.base import RawOffer
 from src.sources.config import SourceConfig, load_source_configs
@@ -36,6 +40,10 @@ def _ensure_source(session, config: SourceConfig) -> Source:
     return source
 
 
+def _non_empty(values: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in values.items() if value is not None and value != ""}
+
+
 def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
     observation = session.scalar(
         select(OfferSourceObservation).where(
@@ -51,24 +59,75 @@ def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
         observation.offer.last_seen_at = now
         return False
 
-    has_benefit = raw.discount_percent is not None or raw.discount_amount is not None or bool(raw.promo_code)
-    offer = Offer(
-        offer_type="promo" if raw.promo_code else "discount",
-        status="ready" if has_benefit else "needs_review",
-        title=raw.title,
-        description=raw.description,
-        merchant=raw.merchant,
-        promo_code=raw.promo_code,
-        discount_percent=raw.discount_percent,
-        discount_amount=raw.discount_amount,
-        canonical_url=raw.source_url,
-        image_url=raw.image_url,
-        valid_until=raw.valid_until,
-        first_seen_at=now,
-        last_seen_at=now,
-    )
-    session.add(offer)
-    session.flush()
+    normalized = normalize_raw_offer(raw)
+    match = find_existing_offer(session, normalized)
+    repo = OfferRepository(session)
+
+    if match.offer is not None:
+        offer = match.offer
+        classification = classify_offer(
+            session,
+            title=normalized.title,
+            merchant=normalized.merchant,
+            brand=offer.brand,
+            offer=offer,
+        )
+        repo.update(
+            offer,
+            _non_empty(
+                {
+                    "title": normalized.title,
+                    "description": raw.description,
+                    "merchant": normalized.merchant,
+                    "promo_code": normalized.promo_code,
+                    "discount_percent": normalized.discount_percent,
+                    "discount_amount": normalized.discount_amount,
+                    "old_price": normalized.old_price,
+                    "new_price": normalized.new_price,
+                    "canonical_url": normalized.canonical_url,
+                    "image_url": raw.image_url,
+                    "valid_until": raw.valid_until,
+                    "offer_type": normalized.offer_type,
+                    "fingerprint": normalized.fingerprint,
+                    "category": classification.category,
+                    "subcategory": classification.subcategory,
+                    "last_seen_at": now,
+                }
+            ),
+        )
+    else:
+        classification = classify_offer(
+            session,
+            title=normalized.title,
+            merchant=normalized.merchant,
+        )
+        has_benefit = (
+            normalized.discount_percent is not None
+            or normalized.discount_amount is not None
+            or bool(normalized.promo_code)
+        )
+        status = "ready" if has_benefit and classification.reason != "fallback" else "needs_review"
+        offer = repo.create(
+            offer_type=normalized.offer_type,
+            status=status,
+            title=normalized.title,
+            description=raw.description,
+            merchant=normalized.merchant,
+            category=classification.category,
+            subcategory=classification.subcategory,
+            promo_code=normalized.promo_code,
+            discount_percent=normalized.discount_percent,
+            discount_amount=normalized.discount_amount,
+            old_price=normalized.old_price,
+            new_price=normalized.new_price,
+            canonical_url=normalized.canonical_url,
+            image_url=raw.image_url,
+            fingerprint=normalized.fingerprint,
+            valid_until=raw.valid_until,
+            first_seen_at=now,
+            last_seen_at=now,
+        )
+
     session.add(
         OfferSourceObservation(
             offer_id=offer.id,
@@ -76,12 +135,19 @@ def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
             external_id=raw.external_id,
             source_url=raw.source_url,
             raw_title=raw.title,
-            raw_payload_json=json.dumps(raw.raw_payload or {}, ensure_ascii=False),
+            raw_payload_json=json.dumps(
+                {
+                    **(raw.raw_payload or {}),
+                    "dedup_reason": match.reason,
+                    "dedup_score": match.score,
+                },
+                ensure_ascii=False,
+            ),
             observed_at=now,
         )
     )
     session.flush()
-    return True
+    return match.offer is None
 
 
 def _record_failed_collection(config: SourceConfig, error: Exception) -> RunResult:
@@ -128,6 +194,10 @@ def run_source(config: SourceConfig) -> RunResult:
 
         parse_run.new_count = result.created
         parse_run.updated_count = result.updated
+        parse_run.duplicate_count = result.updated
+        parse_run.review_count = session.scalar(
+            select(Offer).where(Offer.status == "needs_review").with_only_columns(Offer.id).limit(1)
+        ) is not None
         parse_run.error_count = result.errors
         parse_run.error = "\n".join(errors)[:10000] if errors else None
         parse_run.status = "partial" if errors else "success"
