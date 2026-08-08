@@ -7,6 +7,7 @@ from dataclasses import asdict
 from src.jobs.lifecycle import maintenance
 from src.jobs.scheduler import run_scheduler
 from src.qa.report import write_smoke_report
+from src.runtime import run_all as run_runtime
 from src.shared.config import get_settings
 from src.sources.runner import run_all
 from src.telegram.runner import run_bot
@@ -23,6 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("maintenance", help="Expire and review stale offers")
     subparsers.add_parser("scheduler", help="Run collection, maintenance and autopost scheduler")
     subparsers.add_parser("bot", help="Run Telegram control bot")
+    subparsers.add_parser("run", help="Run Telegram bot and scheduler together")
 
     report_cmd = subparsers.add_parser("smoke-report", help="Write JSON delivery evidence from the current database")
     report_cmd.add_argument("--output", default="output/smoke_report.json", help="Destination JSON path")
@@ -49,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "bot":
         run_bot()
+        return 0
+
+    if args.command == "run":
+        run_runtime()
         return 0
 
     if args.command == "smoke-report":
