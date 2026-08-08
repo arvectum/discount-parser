@@ -7,27 +7,49 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+        python-version:
+          - "3.11"
+    runs-on: ${{ matrix.os }}
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
-      - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[dev]"
-      - run: python -m compileall -q src tests
-      - run: python -m pytest
-      - run: |
-          export DP_DATABASE_URL=sqlite:///./ci_smoke.db
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Compile
+        run: python -m compileall -q src tests
+
+      - name: Tests
+        run: python -m pytest
+
+      - name: Database migration smoke
+        env:
+          DP_DATABASE_URL: sqlite:///./ci_smoke.db
+        run: |
           alembic upgrade head
-          python - <<'PY'
-          from src.shared.db import check_db_connection
-          assert check_db_connection()
-          print("database smoke: ok")
-          PY
-      - run: python -m src.cli --help
-      - run: python -m src.cli parse --help
-      - run: python -m src.cli maintenance --help
-      - run: python -m src.cli scheduler --help
-      - run: python -m src.cli bot --help
+          python -c "from src.shared.db import check_db_connection; assert check_db_connection(); print('database smoke: ok')"
+
+      - name: CLI smoke
+        run: |
+          python -m src.cli --help
+          python -m src.cli parse --help
+          python -m src.cli maintenance --help
+          python -m src.cli scheduler --help
+          python -m src.cli bot --help
+          python -m src.cli smoke-report --help
