@@ -45,6 +45,7 @@ jobs:
         run: |
           alembic upgrade head
           python -c "from src.shared.db import check_db_connection; assert check_db_connection(); print('database smoke: ok')"
+          python -m src.cli doctor
 
       - name: CLI smoke
         run: |
@@ -55,4 +56,5 @@ jobs:
           python -m src.cli bot --help
           python -m src.cli run --help
           python -m src.cli web --help
+          python -m src.cli doctor --help
           python -m src.cli smoke-report --help
