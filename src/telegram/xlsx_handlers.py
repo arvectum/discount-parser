@@ -11,6 +11,7 @@ from src.modules.xlsx.service import export_offers_xlsx, import_offer_correction
 from src.shared.config import get_settings
 
 router = Router(name="discount-parser-xlsx")
+MAX_IMPORT_BYTES = 20 * 1024 * 1024
 
 
 def _is_admin(message: Message) -> bool:
@@ -52,6 +53,9 @@ async def import_document(message: Message, bot: Bot) -> None:
     filename = (document.file_name or "").lower()
     if not filename.endswith(".xlsx"):
         await message.answer("Поддерживается только .xlsx")
+        return
+    if document.file_size and document.file_size > MAX_IMPORT_BYTES:
+        await message.answer("XLSX слишком большой для импорта (максимум 20 MB).")
         return
 
     with tempfile.NamedTemporaryFile(prefix="discount_parser_import_", suffix=".xlsx", delete=False) as handle:
