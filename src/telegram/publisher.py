@@ -38,7 +38,10 @@ def _reserve_publication(offer_id: int, channel_id: str) -> tuple[Offer | None, 
         if existing is not None:
             return offer, existing, "already_reserved"
 
-        publication = Publication(offer_id=offer_id, channel_id=channel_id, status="sending")
+        # "pending" is the durable reservation state defined by the schema.
+        # Creating the row before the Telegram network call preserves the
+        # conservative at-most-once publication guarantee.
+        publication = Publication(offer_id=offer_id, channel_id=channel_id, status="pending")
         session.add(publication)
         try:
             session.commit()
