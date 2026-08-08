@@ -11,8 +11,10 @@ from src.sources.base import RawOffer
 from src.sources.http import HttpClient
 
 _PERCENT_RE = re.compile(r"(?:скидк\w*\s*)?(?:до\s*)?(\d{1,3})\s*%", re.IGNORECASE)
-_AMOUNT_RE = re.compile(r"(?:скидк\w*\s*)?(\d[\d\s]{0,8})\s*(?:₽|руб(?:\.|лей)?)", re.IGNORECASE)
-_OFFER_WORD_RE = re.compile(r"скидк|промокод|кэшб|кешб|бонус", re.IGNORECASE)
+_AMOUNT_RE = re.compile(r"(\d[\d\s]{0,8})\s*(?:₽|руб(?:\.|лей)?)", re.IGNORECASE)
+_OFFER_WORD_RE = re.compile(r"скидк|промокод|кэшб|кешб|бонус|бесплатно", re.IGNORECASE)
+_BENEFIT_START_RE = re.compile(r"\b(?:доп\.?\s*)?(?:скидк\w*|бонус|кэшб\w*|кешб\w*|бесплатно)\b", re.IGNORECASE)
+_ACTION_SUFFIX_RE = re.compile(r"\s+(?:активировать|получить|применить|использовать)\s+промокод.*$", re.IGNORECASE)
 
 
 class PromokoodAdapter:
@@ -35,7 +37,7 @@ class PromokoodAdapter:
             if not action_text or not _OFFER_WORD_RE.search(action_text):
                 continue
             card = self._find_card(action)
-            card_text = " ".join(card.stripped_strings)
+            card_text = re.sub(r"\s+", " ", " ".join(card.stripped_strings)).strip()
             if len(card_text) < 8:
                 continue
 
@@ -69,14 +71,17 @@ class PromokoodAdapter:
         return offers
 
     def _find_card(self, action: Tag) -> Tag:
+        action_text = re.sub(r"\s+", " ", action.get_text(" ", strip=True)).strip()
+        fallback: Tag = action
         for parent in action.parents:
             if not isinstance(parent, Tag):
                 continue
+            text = re.sub(r"\s+", " ", " ".join(parent.stripped_strings)).strip()
             if parent.name in {"article", "li"}:
                 return parent
-            if parent.name == "div" and len(" ".join(parent.stripped_strings)) <= 800:
-                return parent
-        return action
+            if parent.name == "div" and len(text) <= 800 and len(text) > len(action_text) + 5:
+                fallback = parent
+        return fallback
 
     def _merchant(self, card: Tag, action_text: str) -> str | None:
         for selector in ("h2", "h3", "h4", "strong", "b"):
@@ -85,6 +90,14 @@ class PromokoodAdapter:
                 value = node.get_text(" ", strip=True)
                 if value and value != action_text and len(value) <= 120:
                     return value
+
+        text = re.sub(r"\s+", " ", " ".join(card.stripped_strings)).strip()
+        benefit = _BENEFIT_START_RE.search(text)
+        if benefit:
+            prefix = text[: benefit.start()].strip(" :-—")
+            if prefix:
+                return prefix[:120]
+
         parts = [x.strip() for x in card.stripped_strings if x.strip() and x.strip() != action_text]
         return parts[0][:120] if parts else None
 
@@ -92,6 +105,7 @@ class PromokoodAdapter:
         text = re.sub(r"\s+", " ", card_text).strip()
         if merchant and text.lower().startswith(merchant.lower()):
             text = text[len(merchant):].strip(" :-—")
+        text = _ACTION_SUFFIX_RE.sub("", text).strip(" :-—")
         return text[:300] or merchant or "Предложение"
 
     def _discount_percent(self, text: str) -> Decimal | None:
