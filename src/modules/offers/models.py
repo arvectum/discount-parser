@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.shared.db import Base
@@ -47,6 +47,8 @@ class Source(Base):
 class Offer(Base):
     __tablename__ = "offers"
     __table_args__ = (
+        CheckConstraint("offer_type IN ('promo','discount','cashback','delivery','other')", name="ck_offers_offer_type"),
+        CheckConstraint("status IN ('new','ready','needs_review','published','expired','rejected')", name="ck_offers_status"),
         Index("ix_offers_status", "status"),
         Index("ix_offers_category", "category", "subcategory"),
         Index("ix_offers_valid_until", "valid_until"),
@@ -57,7 +59,6 @@ class Offer(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     offer_type: Mapped[str] = mapped_column(String(32), default=OfferType.OTHER.value, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default=OfferStatus.NEW.value, nullable=False)
-
     title: Mapped[str] = mapped_column(Text, nullable=False)
     display_title: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
@@ -65,7 +66,6 @@ class Offer(Base):
     brand: Mapped[str | None] = mapped_column(String(255))
     category: Mapped[str | None] = mapped_column(String(255))
     subcategory: Mapped[str | None] = mapped_column(String(255))
-
     promo_code: Mapped[str | None] = mapped_column(String(255))
     discount_percent: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
     discount_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
@@ -75,11 +75,9 @@ class Offer(Base):
     cashback_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     delivery_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     currency: Mapped[str] = mapped_column(String(8), default="RUB", nullable=False)
-
     canonical_url: Mapped[str | None] = mapped_column(Text)
     image_url: Mapped[str | None] = mapped_column(Text)
     fingerprint: Mapped[str | None] = mapped_column(String(64))
-
     valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
@@ -114,6 +112,7 @@ class OfferSourceObservation(Base):
 
 class ParseRun(Base):
     __tablename__ = "parse_runs"
+    __table_args__ = (CheckConstraint("status IN ('running','success','partial','failed')", name="ck_parse_runs_status"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id", ondelete="SET NULL"))
@@ -161,7 +160,10 @@ class ManualOverride(Base):
 
 class Publication(Base):
     __tablename__ = "publications"
-    __table_args__ = (UniqueConstraint("offer_id", "channel_id", name="uq_publication_offer_channel"),)
+    __table_args__ = (
+        UniqueConstraint("offer_id", "channel_id", name="uq_publication_offer_channel"),
+        CheckConstraint("status IN ('pending','published','failed','skipped')", name="ck_publications_status"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id", ondelete="CASCADE"), nullable=False)
