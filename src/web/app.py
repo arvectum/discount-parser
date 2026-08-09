@@ -28,7 +28,7 @@ from src.web.setup import is_setup_complete, save_operational_settings, save_tel
 
 app = FastAPI(title='Discount Parser Control Panel', docs_url=None, redoc_url=None)
 _parse_lock = threading.Lock()
-_parse_state = {'running': False, 'last_error': None, 'last_finished': None}
+_parse_state = {'running': False, 'last_error': None, 'last_finished': None, 'city': None, 'region': None}
 
 STYLE = '''
 <style>
@@ -57,13 +57,15 @@ def _distinct_offer_values(field) -> list[str]:
     return [str(value) for value in values if value]
 
 
-def _run_parse_thread() -> None:
+def _run_parse_thread(*, city: str | None = None, region: str | None = None) -> None:
     if not _parse_lock.acquire(blocking=False):
         return
     _parse_state['running'] = True
     _parse_state['last_error'] = None
+    _parse_state['city'] = city
+    _parse_state['region'] = region
     try:
-        run_all(path=get_settings().sources_config_path)
+        run_all(path=get_settings().sources_config_path, city=city, region=region)
     except Exception as exc:
         _parse_state['last_error'] = f'{type(exc).__name__}: {exc}'
     finally:
@@ -194,6 +196,7 @@ def dashboard(message: str | None = None):
 
     parse_status = '<span class="pill on">ИДЁТ СБОР</span>' if _parse_state['running'] else '<span class="pill off">НЕ ЗАПУЩЕН</span>'
     parse_error = f'<div class="error" style="margin-top:10px">{html.escape(str(_parse_state["last_error"]))}</div>' if _parse_state['last_error'] else ''
+    last_geo = ', '.join(value for value in (_parse_state.get('city'), _parse_state.get('region')) if value) or 'все регионы'
     flash = f'<div class="ok flash">{html.escape(message)}</div>' if message else ''
 
     body = f'''<div class="wrap">
@@ -207,7 +210,7 @@ def dashboard(message: str | None = None):
       <div class="card"><div class="muted">Истекло</div><div class="metric">{metrics['expired']}</div></div>
     </div>
     <div class="grid">{proc_card('bot','Telegram-бот')}{proc_card('scheduler','Автоматическое расписание')}
-      <div class="card"><b>Парсер</b><div style="margin:12px 0">{parse_status}</div><form method="post" action="/parse"><button class="btn good" {'disabled' if _parse_state['running'] else ''}>Запустить сбор сейчас</button></form><div class="muted small" style="margin-top:8px">ГЕО определяется при парсинге: город и/или регион сохраняются в предложении, если их удалось уверенно извлечь.</div><div class="muted" style="margin-top:8px">Последний запуск: {html.escape(str(_parse_state['last_finished'] or '—'))}</div>{parse_error}</div>
+      <div class="card"><b>Парсер</b><div style="margin:12px 0">{parse_status}</div><form method="post" action="/parse"><div class="filter-grid"><div class="field"><label>Регион для этого запуска</label><input name="region" placeholder="например, Московская область"></div><div class="field"><label>Город для этого запуска</label><input name="city" placeholder="например, Москва"></div></div><button class="btn good" style="margin-top:12px" {'disabled' if _parse_state['running'] else ''}>Запустить сбор сейчас</button></form><div class="muted small" style="margin-top:8px">Оба поля необязательны. Если ГЕО задано, сохраняются только совпавшие предложения; неизвестное ГЕО не угадывается. В самих Offer город/регион определяются и сохраняются при парсинге.</div><div class="muted" style="margin-top:8px">Последний запуск: {html.escape(str(_parse_state['last_finished'] or '—'))} · ГЕО: {html.escape(last_geo)}</div>{parse_error}</div>
     </div>
     <div class="card section"><div class="row" style="justify-content:space-between"><div><b>Telegram</b><div class="muted">{html.escape(settings.telegram_bot_name or 'Бот')} → {html.escape(settings.telegram_channel_id or '')}</div></div><a class="btn secondary" href="/setup">Изменить</a></div></div>
     <div class="card section"><h3 style="margin-top:0">Расписание</h3><div class="muted small" style="margin-bottom:16px">Все интервалы меняются здесь, без редактирования .env.</div>{_schedule_form()}</div>
@@ -321,9 +324,15 @@ def save_filter(
 
 
 @app.post('/parse')
-def start_parse():
+def start_parse(region: str = Form(''), city: str = Form('')):
     if not _parse_state['running']:
-        threading.Thread(target=_run_parse_thread, daemon=True).start()
+        target_region = region.strip() or None
+        target_city = city.strip() or None
+        threading.Thread(
+            target=_run_parse_thread,
+            kwargs={'region': target_region, 'city': target_city},
+            daemon=True,
+        ).start()
     return RedirectResponse('/?message=Парсинг+запущен', status_code=303)
 
 
