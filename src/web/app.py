@@ -53,7 +53,7 @@ def _metrics() -> dict[str, int]:
 
 def _distinct_offer_values(field) -> list[str]:
     with create_session() as session:
-        values = session.scalars(select(field).where(field.is_not(None), field != '').distinct().order_by(field).limit(100)).all()
+        values = session.scalars(select(field).where(field.is_not(None), field != '').distinct().order_by(field).limit(200)).all()
     return [str(value) for value in values if value]
 
 
@@ -78,6 +78,8 @@ def _filter_form() -> str:
     categories = _distinct_offer_values(Offer.category)
     subcategories = _distinct_offer_values(Offer.subcategory)
     merchants = _distinct_offer_values(Offer.merchant)
+    cities = _distinct_offer_values(Offer.city)
+    regions = _distinct_offer_values(Offer.region)
 
     def options(values: list[str], current: str | None, all_label: str) -> str:
         result = [f'<option value="">{html.escape(all_label)}</option>']
@@ -90,6 +92,8 @@ def _filter_form() -> str:
     return f'''<form method="post" action="/filter">
       <div class="filter-grid">
         <div class="field"><label>Минимальная скидка, %</label><input name="min_discount_percent" value="{row.min_discount_percent or 0}" inputmode="decimal"></div>
+        <div class="field"><label>Регион</label><select name="region">{options(regions,row.region,'Все регионы')}</select></div>
+        <div class="field"><label>Город</label><select name="city">{options(cities,row.city,'Все города')}</select></div>
         <div class="field"><label>Категория</label><select name="category">{options(categories,row.category,'Все категории')}</select></div>
         <div class="field"><label>Подкатегория</label><select name="subcategory">{options(subcategories,row.subcategory,'Все подкатегории')}</select></div>
         <div class="field"><label>Тип</label><select name="offer_type"><option value="">Все типы</option>{''.join(f'<option value="{kind}"{" selected" if row.offer_type == kind else ""}>{kind}</option>' for kind in ('discount','promo','cashback','delivery','other'))}</select></div>
@@ -127,6 +131,8 @@ def _queue_html() -> str:
         offer_type=criteria.offer_type,
         merchant=criteria.merchant,
         source_key=criteria.source_key,
+        city=criteria.city,
+        region=criteria.region,
         limit=min(max(criteria.limit, 1), 20),
     )
     with create_session() as session:
@@ -142,8 +148,9 @@ def _queue_html() -> str:
             benefit.append(f'−{offer.discount_amount:g} {html.escape(offer.currency or "₽")}')
         if offer.promo_code:
             benefit.append(f'код {html.escape(offer.promo_code)}')
+        geo = ', '.join(value for value in (offer.city, offer.region) if value) or 'ГЕО не указано'
         link = f'<a class="btn secondary" target="_blank" rel="noopener" href="{html.escape(offer.canonical_url)}">Открыть</a>' if offer.canonical_url and offer.canonical_url.startswith(('http://','https://')) else ''
-        chunks.append(f'''<div class="offer"><h4>{html.escape(offer.display_title or offer.title)}</h4><div class="offer-meta"><span>{html.escape(offer.merchant or '—')}</span><span>{html.escape(offer.category or 'Без категории')}</span><span>{html.escape(offer.offer_type or 'other')}</span><span>{' · '.join(benefit) or 'выгода не указана'}</span></div><div class="row" style="margin-top:12px"><form method="post" action="/publish/{offer.id}"><button class="btn good">Опубликовать</button></form><form method="post" action="/reject/{offer.id}"><button class="btn bad">Отклонить</button></form>{link}</div></div>''')
+        chunks.append(f'''<div class="offer"><h4>{html.escape(offer.display_title or offer.title)}</h4><div class="offer-meta"><span>{html.escape(offer.merchant or '—')}</span><span>📍 {html.escape(geo)}</span><span>{html.escape(offer.category or 'Без категории')}</span><span>{html.escape(offer.offer_type or 'other')}</span><span>{' · '.join(benefit) or 'выгода не указана'}</span></div><div class="row" style="margin-top:12px"><form method="post" action="/publish/{offer.id}"><button class="btn good">Опубликовать</button></form><form method="post" action="/reject/{offer.id}"><button class="btn bad">Отклонить</button></form>{link}</div></div>''')
     return '<div class="queue">' + ''.join(chunks) + '</div>'
 
 
@@ -200,12 +207,12 @@ def dashboard(message: str | None = None):
       <div class="card"><div class="muted">Истекло</div><div class="metric">{metrics['expired']}</div></div>
     </div>
     <div class="grid">{proc_card('bot','Telegram-бот')}{proc_card('scheduler','Автоматическое расписание')}
-      <div class="card"><b>Парсер</b><div style="margin:12px 0">{parse_status}</div><form method="post" action="/parse"><button class="btn good" {'disabled' if _parse_state['running'] else ''}>Запустить сбор сейчас</button></form><div class="muted" style="margin-top:8px">Последний запуск: {html.escape(str(_parse_state['last_finished'] or '—'))}</div>{parse_error}</div>
+      <div class="card"><b>Парсер</b><div style="margin:12px 0">{parse_status}</div><form method="post" action="/parse"><button class="btn good" {'disabled' if _parse_state['running'] else ''}>Запустить сбор сейчас</button></form><div class="muted small" style="margin-top:8px">ГЕО определяется при парсинге: город и/или регион сохраняются в предложении, если их удалось уверенно извлечь.</div><div class="muted" style="margin-top:8px">Последний запуск: {html.escape(str(_parse_state['last_finished'] or '—'))}</div>{parse_error}</div>
     </div>
     <div class="card section"><div class="row" style="justify-content:space-between"><div><b>Telegram</b><div class="muted">{html.escape(settings.telegram_bot_name or 'Бот')} → {html.escape(settings.telegram_channel_id or '')}</div></div><a class="btn secondary" href="/setup">Изменить</a></div></div>
     <div class="card section"><h3 style="margin-top:0">Расписание</h3><div class="muted small" style="margin-bottom:16px">Все интервалы меняются здесь, без редактирования .env.</div>{_schedule_form()}</div>
     <div class="card section"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">Источники</h3><div class="muted small">Включайте и выключайте источники; выбор хранится в базе и сохраняется при обновлениях.</div></div></div><div class="source" style="margin-top:14px"><b>Источник</b><b>Состояние</b><b>Получено</b><b>Последний запуск</b><b>Действие</b></div>{_source_rows()}</div>
-    <div class="card section"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">Фильтр публикации</h3><div class="muted small">Одинаковый для веб-панели, Telegram `/queue` и автопостинга.</div></div></div><div style="margin-top:16px">{_filter_form()}</div></div>
+    <div class="card section"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">Фильтр публикации</h3><div class="muted small">Одинаковый для веб-панели, Telegram `/queue` и автопостинга. Можно ограничить публикации конкретным регионом и/или городом.</div></div></div><div style="margin-top:16px">{_filter_form()}</div></div>
     <div class="card section"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">Очередь публикации</h3><div class="muted small">До 20 следующих предложений по текущему фильтру.</div></div></div><div style="margin-top:16px">{_queue_html()}</div></div>
     <div class="card section"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">XLSX-коррекция</h3><div class="muted small">Скачайте файл, меняйте только category/subcategory и загрузите обратно.</div></div><a class="btn secondary" href="/export">Экспорт</a></div><form method="post" action="/import" enctype="multipart/form-data" class="row" style="margin-top:14px"><input type="file" name="file" accept=".xlsx" required><button class="btn good">Импортировать XLSX</button></form></div>
     </div>'''
@@ -286,6 +293,8 @@ def source_action(source_key: str, action: str):
 @app.post('/filter')
 def save_filter(
     min_discount_percent: str = Form('0'),
+    region: str = Form(''),
+    city: str = Form(''),
     category: str = Form(''),
     subcategory: str = Form(''),
     offer_type: str = Form(''),
@@ -300,6 +309,8 @@ def save_filter(
     update_default_filter(
         enabled=bool(enabled),
         min_discount_percent=max(Decimal('0'), minimum),
+        region=region.strip() or None,
+        city=city.strip() or None,
         category=category.strip() or None,
         subcategory=subcategory.strip() or None,
         offer_type=offer_type.strip() or None,
