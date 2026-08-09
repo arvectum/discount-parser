@@ -57,9 +57,8 @@ def test_publication_is_unique_per_offer_and_channel(sqlite_db: Path) -> None:
     with create_session() as session:
         repo = OfferRepository(session)
         offer = session.query(Offer).one()
-        repo.create_publication(offer, "@discounts")
         with pytest.raises(IntegrityError):
-            session.commit()
+            repo.create_publication(offer, "@discounts")
         session.rollback()
 
 
