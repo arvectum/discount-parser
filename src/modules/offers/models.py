@@ -51,6 +51,7 @@ class Offer(Base):
         CheckConstraint("status IN ('new','ready','needs_review','published','expired','rejected')", name="ck_offers_status"),
         Index("ix_offers_status", "status"),
         Index("ix_offers_category", "category", "subcategory"),
+        Index("ix_offers_geo", "region", "city"),
         Index("ix_offers_valid_until", "valid_until"),
         Index("ix_offers_canonical_url", "canonical_url"),
         Index("ix_offers_fingerprint", "fingerprint"),
@@ -66,6 +67,8 @@ class Offer(Base):
     brand: Mapped[str | None] = mapped_column(String(255))
     category: Mapped[str | None] = mapped_column(String(255))
     subcategory: Mapped[str | None] = mapped_column(String(255))
+    city: Mapped[str | None] = mapped_column(String(255))
+    region: Mapped[str | None] = mapped_column(String(255))
     promo_code: Mapped[str | None] = mapped_column(String(255))
     discount_percent: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
     discount_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
@@ -190,6 +193,8 @@ class PublishFilter(Base):
     offer_type: Mapped[str | None] = mapped_column(String(32))
     merchant: Mapped[str | None] = mapped_column(String(255))
     source_key: Mapped[str | None] = mapped_column(String(100))
+    city: Mapped[str | None] = mapped_column(String(255))
+    region: Mapped[str | None] = mapped_column(String(255))
     max_posts_per_cycle: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
