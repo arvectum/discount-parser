@@ -10,16 +10,16 @@ from src.modules.offers.models import Offer, PublishFilter
 from src.shared.config import get_settings
 from src.shared.db import Base, create_session, get_engine, reset_db_runtime
 from src.web.app import app
-from src.web import setup as setup_module
+from src.web import setup as web_setup
 
 
 @pytest.fixture
 def web_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DP_DATABASE_URL", f"sqlite:///{tmp_path / 'web.db'}")
-    setup_module.ENV_PATH = tmp_path / ".env"
-    setup_module.ENV_EXAMPLE_PATH = tmp_path / ".env.example"
-    setup_module.ENV_EXAMPLE_PATH.write_text(
+    web_setup.ENV_PATH = tmp_path / ".env"
+    web_setup.ENV_EXAMPLE_PATH = tmp_path / ".env.example"
+    web_setup.ENV_EXAMPLE_PATH.write_text(
         "DP_DATABASE_URL=sqlite:///./web.db\n"
         "DP_TELEGRAM_BOT_TOKEN=\n"
         "DP_TELEGRAM_BOT_NAME=\n"
@@ -54,8 +54,8 @@ def test_first_launch_redirects_to_setup_and_saves_configuration(web_env: Path) 
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert setup_module.ENV_PATH.exists()
-    env_text = setup_module.ENV_PATH.read_text(encoding="utf-8")
+    assert web_setup.ENV_PATH.exists()
+    env_text = web_setup.ENV_PATH.read_text(encoding="utf-8")
     assert "DP_TELEGRAM_CHANNEL_ID=@deals_test" in env_text
     assert "DP_TELEGRAM_ADMIN_IDS=123456789" in env_text
 
@@ -67,7 +67,7 @@ def test_first_launch_redirects_to_setup_and_saves_configuration(web_env: Path) 
 
 
 def test_web_filter_updates_shared_publish_filter(web_env: Path) -> None:
-    setup_module.save_telegram_setup(
+    web_setup.save_telegram_setup(
         bot_token="123456789:AAabcdefghijklmnopqrstuvwxyz",
         bot_name="Deals Bot",
         channel_id="@deals_test",
