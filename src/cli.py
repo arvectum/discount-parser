@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import asdict
 
 from src.jobs.lifecycle import maintenance
@@ -20,6 +21,17 @@ from src.telegram.runner import run_bot
 from src.web.launcher import run_web_panel
 
 
+def _configure_console_encoding() -> None:
+    """Use UTF-8 for Russian diagnostic output on Windows and frozen workers."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, ValueError):
+                pass
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="discount-parser")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -33,15 +45,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("registry-seed", help="Seed default keywords and mirror legacy source adapters into the registry")
 
-    registry_export = subparsers.add_parser("registry-export", help="Export registered sources, candidates and keywords to XLSX")
+    registry_export = subparsers.add_parser("registry-export", help="Export source registry/candidates/keywords to XLSX")
     registry_export.add_argument("--output", default="output/sources_registry.xlsx")
 
-    registry_import = subparsers.add_parser("registry-import", help="Import source registry XLSX")
+    registry_import = subparsers.add_parser("registry-import", help="Import source registry/candidates/keywords from XLSX")
     registry_import.add_argument("path")
 
-    discover_cmd = subparsers.add_parser("discover-merchant", help="Discover same-domain promotion pages from a known merchant homepage")
-    discover_cmd.add_argument("--merchant", required=True)
-    discover_cmd.add_argument("--url", required=True)
+    discover = subparsers.add_parser("discover-merchant", help="Discover same-domain promotion page candidates")
+    discover.add_argument("--merchant", required=True)
+    discover.add_argument("--url", required=True)
+    discover.add_argument("--max-candidates", type=int, default=20)
 
     subparsers.add_parser("maintenance", help="Expire and review stale offers")
     subparsers.add_parser("scheduler", help="Run collection, maintenance and autopost scheduler")
@@ -56,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _configure_console_encoding()
     args = build_parser().parse_args(argv)
     settings = get_settings()
 
@@ -64,16 +78,16 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps([asdict(result) for result in results], ensure_ascii=False, indent=2, default=str))
         return 1 if any(result.errors and result.fetched == 0 for result in results) else 0
 
+    if args.command == "registry-seed":
+        with session_scope() as session:
+            result = seed_registry(session, settings.sources_config_path)
+        print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
+        return 0
+
     if args.command == "registry-collect":
         results = collect_registered_sources(only_key=args.source)
         print(json.dumps([asdict(result) for result in results], ensure_ascii=False, indent=2, default=str))
         return 1 if any(result.errors and result.fetched == 0 for result in results) else 0
-
-    if args.command == "registry-seed":
-        with session_scope() as session:
-            result = seed_registry(session, sources_config_path=settings.sources_config_path)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0
 
     if args.command == "registry-export":
         path = export_source_registry_xlsx(args.output)
@@ -82,14 +96,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "registry-import":
         report = import_source_registry_xlsx(args.path)
-        print(json.dumps(asdict(report), ensure_ascii=False, indent=2, default=str))
+        print(json.dumps(asdict(report), ensure_ascii=False, indent=2))
         return 1 if report.errors else 0
 
     if args.command == "discover-merchant":
-        with session_scope() as session:
-            count = discover_merchant_pages(session, merchant=args.merchant, homepage_url=args.url)
-        print(json.dumps({"candidates": count}, ensure_ascii=False, indent=2))
-        return 0
+        result = discover_merchant_pages(
+            merchant=args.merchant,
+            homepage=args.url,
+            max_candidates=max(1, min(args.max_candidates, 100)),
+        )
+        print(json.dumps(asdict(result), ensure_ascii=False, indent=2, default=str))
+        return 1 if result.error else 0
 
     if args.command == "maintenance":
         result = maintenance(stale_after_days=settings.stale_after_days)
