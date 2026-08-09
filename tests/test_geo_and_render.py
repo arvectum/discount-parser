@@ -84,7 +84,7 @@ def test_unified_telegram_caption_uses_structured_fields_only() -> None:
         promo_code="COFFEE25",
     )
     caption = render_offer_caption(offer)
-    assert caption.startswith("<b>🔥 Магазин — скидка 25%</b>")
+    assert caption.startswith("<b>🔥 Кофемашина со скидкой</b>")
     assert "🏪 Поставщик: Магазин" in caption
     assert "💰 Цена:" in caption
     assert "💸 Скидка: <b>25%</b>" in caption
