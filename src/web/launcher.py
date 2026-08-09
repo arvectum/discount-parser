@@ -38,6 +38,22 @@ def _autostart_packaged_services() -> None:
             pass
 
 
+def _uvicorn_logging_kwargs() -> dict[str, object]:
+    """Return logging overrides safe for console-less frozen GUI builds.
+
+    PyInstaller windowed applications on Windows can set ``sys.stdout`` and
+    ``sys.stderr`` to ``None``. Uvicorn's default logging formatter probes
+    ``sys.stdout.isatty()`` while Config is being constructed, so the web panel
+    crashes before it can bind a port. In that environment we leave logging to
+    the application and prevent Uvicorn from installing console handlers.
+
+    Source/dev and console-backed frozen runs keep Uvicorn's normal logging.
+    """
+    if getattr(sys, 'frozen', False) and (sys.stdout is None or sys.stderr is None):
+        return {'log_config': None}
+    return {}
+
+
 def run_web_panel() -> None:
     settings = get_settings()
     url = f'http://127.0.0.1:{settings.web_port}'
@@ -59,4 +75,5 @@ def run_web_panel() -> None:
         port=settings.web_port,
         reload=False,
         log_level=settings.log_level.lower(),
+        **_uvicorn_logging_kwargs(),
     )
