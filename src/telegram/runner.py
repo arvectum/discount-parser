@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 
-from aiogram import Bot, Dispatcher
+from aiogram import Dispatcher
 
 from src.shared.config import get_settings
 from src.telegram.bot import router as control_router
+from src.telegram.client import build_bot
 from src.telegram.xlsx_handlers import router as xlsx_router
 
 
@@ -22,7 +23,7 @@ async def run_bot_async() -> None:
         raise RuntimeError("DP_TELEGRAM_BOT_TOKEN is not configured")
     if not settings.telegram_admin_id_set:
         raise RuntimeError("DP_TELEGRAM_ADMIN_IDS is not configured")
-    bot = Bot(token=settings.telegram_bot_token)
+    bot = build_bot(settings.telegram_bot_token)
     dispatcher = build_dispatcher()
     try:
         await dispatcher.start_polling(bot)
