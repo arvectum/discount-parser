@@ -61,9 +61,10 @@ def test_first_launch_redirects_to_setup_and_saves_configuration(web_env: Path) 
 
     response = client.get("/")
     assert response.status_code == 200
-    assert "Панель управления парсером" in response.text
-    assert "Очередь публикации" in response.text
-    assert "XLSX-коррекция" in response.text
+    assert "Что делать сейчас" in response.text
+    assert "Собрать предложения" in response.text
+    assert "Открыть проверку" in response.text
+    assert "Расширенные функции" in response.text
 
 
 def test_web_filter_updates_shared_publish_filter(web_env: Path) -> None:
