@@ -19,6 +19,7 @@ from src.web.setup import is_setup_complete
 from src.web.source_registry_static_routes import router as source_registry_static_router
 from src.web.source_registry_routes import router as source_registry_router
 from src.web.system_routes import router as system_router
+from src.web.telegram_format_routes import router as telegram_format_router
 from src.web.ux_routes import router as ux_router
 
 app.include_router(management_router)
@@ -28,11 +29,13 @@ app.include_router(source_registry_router)
 app.include_router(system_router)
 app.include_router(network_router)
 app.include_router(onboarding_router)
+app.include_router(telegram_format_router)
 app.include_router(ux_router)
 
 _LOCAL_HOSTS = {'127.0.0.1', 'localhost', '::1'}
 _MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 _BRAND_PATCH_STYLE = '<style>.arv-header svg{display:block;width:210px;max-width:48vw;height:auto}</style>'
+_TELEGRAM_FORMAT_SETTINGS_CARD = '''<article class="ux-setting"><h2>Формат публикации Telegram</h2><p>Выберите поля поста и их порядок. Изменения видны в предпросмотре и не требуют редактирования кода.</p><a class="ux-primary" href="/settings/telegram-format">Настроить формат</a></article>'''
 
 
 def _is_local_url(value: str) -> bool:
@@ -83,6 +86,10 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
         async for chunk in response.body_iterator:
             body += chunk
         text = body.decode('utf-8')
+        if request.method == 'GET' and request.url.path == '/settings' and 'href="/settings/telegram-format"' not in text:
+            marker = '<div class="ux-cards">'
+            if marker in text:
+                text = text.replace(marker, marker + _TELEGRAM_FORMAT_SETTINGS_CARD, 1)
         if 'id="arvectum-brand-style"' not in text:
             brand_css = BRAND_STYLE + _BRAND_PATCH_STYLE
             if '</head>' in text:
