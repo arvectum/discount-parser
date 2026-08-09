@@ -14,7 +14,40 @@ Discount Parser собирает скидки, промокоды, кэшбэк 
 
 ---
 
-## 2. Первая установка на macOS
+## 2. Установка на Windows
+
+Это основной вариант для обычного клиента на Windows 10/11 x64.
+
+1. Получите файл `DiscountParser-Setup.exe` от Арвектум.
+2. Если Discount Parser уже запущен, закройте его перед установкой или обновлением.
+3. Дважды щёлкните по `DiscountParser-Setup.exe`.
+4. Пройдите стандартный мастер установки. Для обычной установки администраторские права не требуются.
+5. Оставьте предложенный каталог установки, если нет специальной причины его менять.
+6. После установки запустите **Discount Parser** с ярлыка на рабочем столе или из меню «Пуск».
+7. Приложение откроет локальную панель управления в браузере.
+8. При первом запуске пройдите мастер Telegram и сети.
+
+По умолчанию программа устанавливается в пользовательский каталог:
+
+`%LOCALAPPDATA%\DiscountParser`
+
+Там же хранятся `.env` и SQLite-база рабочей установки.
+
+### Обновление на Windows
+
+1. Закройте Discount Parser.
+2. Сделайте резервную копию каталога `%LOCALAPPDATA%\DiscountParser`, если обновление выполняется вручную администратором.
+3. Запустите новый `DiscountParser-Setup.exe` поверх существующей установки.
+4. Не удаляйте предварительно `.env` и `discount_parser.db`.
+5. После установки запустите программу и убедитесь, что авторизация, база и настройки сохранились.
+
+Новый installer не должен включать рабочую SQLite-базу из build-smoke и поэтому не должен заменять пользовательский `discount_parser.db`.
+
+Если Windows показывает предупреждение SmartScreen, сначала убедитесь, что installer получен из доверенного канала Арвектум. Не отключайте SmartScreen глобально.
+
+---
+
+## 3. Установка на macOS
 
 1. Получите файл `DiscountParser.dmg`.
 2. Дважды щёлкните по нему.
@@ -32,7 +65,170 @@ Discount Parser собирает скидки, промокоды, кэшбэк 
 
 ---
 
-## 3. Первичная настройка
+## 4. Установка на сервер Linux
+
+Linux-вариант предназначен для постоянной работы на сервере. Отдельный графический Linux-installer сейчас не собирается: приложение запускается из исходной поставки под **Python 3.11+**.
+
+Ниже пример для Debian/Ubuntu. Панель остаётся localhost-only и не должна напрямую выставляться в интернет.
+
+### 4.1. Подготовить пользователя и каталоги
+
+```bash
+sudo useradd --system --create-home \
+  --home-dir /var/lib/discount-parser \
+  --shell /usr/sbin/nologin discountparser 2>/dev/null || true
+
+sudo mkdir -p /opt/discount-parser /var/lib/discount-parser
+```
+
+Поместите файлы приложения в `/opt/discount-parser`, затем:
+
+```bash
+sudo chown -R discountparser:discountparser \
+  /opt/discount-parser /var/lib/discount-parser
+```
+
+### 4.2. Установить Python environment
+
+Установите Python 3.11+ и модуль venv средствами вашей ОС, затем:
+
+```bash
+cd /opt/discount-parser
+sudo -u discountparser python3.11 -m venv .venv
+sudo -u discountparser .venv/bin/pip install --upgrade pip
+sudo -u discountparser .venv/bin/pip install .
+sudo -u discountparser cp .env.example /var/lib/discount-parser/.env.example
+```
+
+### 4.3. Создать и мигрировать базу
+
+```bash
+cd /opt/discount-parser
+sudo -u discountparser env \
+  DP_RUNTIME_ROOT=/var/lib/discount-parser \
+  DP_DATABASE_URL=sqlite:////var/lib/discount-parser/discount_parser.db \
+  .venv/bin/python -m src.distribution_entry migrate
+```
+
+### 4.4. Создать systemd-сервисы
+
+Нужно три процесса:
+
+- web — локальная панель;
+- bot — Telegram-бот;
+- scheduler — сбор и автопостинг по расписанию.
+
+Создайте `/etc/systemd/system/discount-parser-web.service`:
+
+```ini
+[Unit]
+Description=Discount Parser web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=discountparser
+WorkingDirectory=/opt/discount-parser
+Environment=DP_RUNTIME_ROOT=/var/lib/discount-parser
+Environment=DP_DATABASE_URL=sqlite:////var/lib/discount-parser/discount_parser.db
+ExecStart=/opt/discount-parser/.venv/bin/python -m src.distribution_entry web
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Создайте `/etc/systemd/system/discount-parser-bot.service` с теми же параметрами, но:
+
+```ini
+Description=Discount Parser Telegram bot
+ExecStart=/opt/discount-parser/.venv/bin/python -m src.distribution_entry bot
+```
+
+Создайте `/etc/systemd/system/discount-parser-scheduler.service` с:
+
+```ini
+Description=Discount Parser scheduler
+ExecStart=/opt/discount-parser/.venv/bin/python -m src.distribution_entry scheduler
+```
+
+Затем:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now discount-parser-web
+```
+
+### 4.5. Открыть панель безопасно
+
+Web-панель слушает `127.0.0.1`, поэтому с рабочего компьютера используйте SSH-туннель:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 user@SERVER
+```
+
+После подключения откройте в браузере:
+
+`http://127.0.0.1:8765`
+
+Пройдите первичный мастер настройки. После того как Telegram-настройки сохранены:
+
+```bash
+sudo systemctl enable --now discount-parser-bot
+sudo systemctl enable --now discount-parser-scheduler
+```
+
+Проверить состояние:
+
+```bash
+sudo systemctl status discount-parser-web
+sudo systemctl status discount-parser-bot
+sudo systemctl status discount-parser-scheduler
+```
+
+Посмотреть логи:
+
+```bash
+journalctl -u discount-parser-web -f
+journalctl -u discount-parser-bot -f
+journalctl -u discount-parser-scheduler -f
+```
+
+### 4.6. Обновление Linux-сервера
+
+1. Остановите сервисы.
+2. Сделайте backup `/var/lib/discount-parser`.
+3. Обновите файлы в `/opt/discount-parser`.
+4. Обновите Python-зависимости.
+5. Выполните миграции.
+6. Запустите сервисы снова.
+
+Пример:
+
+```bash
+sudo systemctl stop discount-parser-web discount-parser-bot discount-parser-scheduler
+
+sudo -u discountparser /opt/discount-parser/.venv/bin/pip install \
+  --upgrade /opt/discount-parser
+
+cd /opt/discount-parser
+sudo -u discountparser env \
+  DP_RUNTIME_ROOT=/var/lib/discount-parser \
+  DP_DATABASE_URL=sqlite:////var/lib/discount-parser/discount_parser.db \
+  .venv/bin/python -m src.distribution_entry migrate
+
+sudo systemctl start discount-parser-web discount-parser-bot discount-parser-scheduler
+```
+
+Не удаляйте `/var/lib/discount-parser/.env` и `/var/lib/discount-parser/discount_parser.db`.
+
+> Важно: локальная панель не имеет архитектуры публичного интернет-сервиса. Не открывайте порт 8765 наружу напрямую. Используйте SSH tunnel, приватный VPN или другой контролируемый локальный доступ.
+
+---
+
+## 5. Первичная настройка
 
 При первом запуске откроется мастер настройки.
 
@@ -71,7 +267,7 @@ Discount Parser собирает скидки, промокоды, кэшбэк 
 
 ---
 
-## 4. Главная страница
+## 6. Главная страница
 
 После настройки приложение открывает упрощённую главную страницу.
 
@@ -86,11 +282,12 @@ Discount Parser собирает скидки, промокоды, кэшбэк 
 
 ### Шаг 1. Собрать
 
-Нажмите **Собрать предложения**.
+Поля **Регион** и **Город** всегда видны в карточке сбора.
 
-Обычно поля «Регион» и «Город» оставляют пустыми. Тогда поиск выполняется без ограничения по ГЕО.
+- Если оба поля пусты — сбор выполняется без ограничения по ГЕО.
+- Если указан регион и/или город — сохраняются только совпавшие предложения согласно текущей логике фильтрации парсинга.
 
-Если нужен локальный запуск, раскройте дополнительные поля и укажите регион и/или город.
+После выбора ГЕО нажмите **Собрать предложения**.
 
 ### Шаг 2. Проверить
 
@@ -108,7 +305,7 @@ Discount Parser собирает скидки, промокоды, кэшбэк 
 
 ---
 
-## 5. Проверка предложения
+## 7. Проверка предложения
 
 На странице «Проверка» для каждого предложения отображаются:
 
@@ -141,7 +338,7 @@ Discount Parser собирает скидки, промокоды, кэшбэк 
 
 ---
 
-## 6. Почему «Готово» и «В очереди» могут отличаться
+## 8. Почему «Готово» и «В очереди» могут отличаться
 
 Это нормальное поведение.
 
@@ -157,7 +354,7 @@ Discount Parser собирает скидки, промокоды, кэшбэк 
 
 ---
 
-## 7. Автопостинг
+## 9. Автопостинг
 
 Scheduler периодически проверяет очередь и отправляет подходящие предложения.
 
@@ -174,7 +371,7 @@ Scheduler периодически проверяет очередь и отпр
 
 ---
 
-## 8. Настройки
+## 10. Настройки
 
 Верхнее меню для обычного пользователя содержит:
 
@@ -208,7 +405,7 @@ Scheduler периодически проверяет очередь и отпр
 
 ---
 
-## 9. Расширенная панель
+## 11. Расширенная панель
 
 Раздел «Настройки → Расширенная панель» содержит функции, которые не нужны в ежедневной работе:
 
@@ -223,7 +420,7 @@ Scheduler периодически проверяет очередь и отпр
 
 ---
 
-## 10. ГЕО
+## 12. ГЕО
 
 Предложение может иметь один из вариантов:
 
@@ -238,7 +435,7 @@ Scheduler периодически проверяет очередь и отпр
 
 ---
 
-## 11. Условия акции
+## 13. Условия акции
 
 Кроме процента скидки программа хранит отдельное поле «Условия».
 
@@ -253,30 +450,7 @@ Scheduler периодически проверяет очередь и отпр
 
 ---
 
-## 12. Обновление программы
-
-1. Закройте Discount Parser.
-2. Откройте новый `DiscountParser.dmg`.
-3. Замените старый `Discount Parser.app` новой версией.
-4. Запустите приложение снова.
-
-Не удаляйте каталог:
-
-`~/Library/Application Support/DiscountParser`
-
-Он содержит рабочую базу и настройки.
-
-После обновления проверьте:
-
-- панель открывается;
-- Telegram-авторизация сохранилась;
-- база предложений на месте;
-- bot и scheduler запущены;
-- сеть показывает рабочий маршрут Telegram.
-
----
-
-## 13. Типовые проблемы
+## 14. Типовые проблемы
 
 ### Telegram не отправляет сообщения
 
@@ -296,11 +470,11 @@ Scheduler периодически проверяет очередь и отпр
 
 ### Панель не открывается
 
-Проверьте, что приложение запущено. Панель работает только локально, обычно по адресу вида:
+Проверьте, что приложение или web-service запущены. Панель работает локально, обычно по адресу вида:
 
 `http://127.0.0.1:<port>/`
 
-Конкретный свободный port может отличаться.
+Конкретный свободный port может отличаться на desktop-сборке. Для Linux systemd-инструкции выше предполагают стандартный порт 8765.
 
 ### Источник не работает через VPN
 
@@ -308,15 +482,15 @@ Scheduler периодически проверяет очередь и отпр
 
 ---
 
-## 14. Что не нужно делать обычному пользователю
+## 15. Что не нужно делать обычному пользователю
 
-Не требуется:
+На Windows и macOS для обычной работы не требуется:
 
 - запускать Python;
-- открывать Terminal для обычной работы;
+- открывать Terminal/PowerShell;
 - редактировать `.env` вручную;
 - переключать Git-ветки;
 - запускать OpenCode/Codex;
 - вручную включать и выключать VPN между каждым источником, если маршрутизация настроена в панели.
 
-Все повседневные операции выполняются из браузерной панели управления.
+На Linux-сервере установка и обновление выполняются администратором, а повседневная модерация и управление предложениями по-прежнему выполняются из браузерной панели.
