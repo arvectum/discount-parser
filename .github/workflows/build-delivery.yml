@@ -120,6 +120,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\DiscountParserWorker.exe doctor
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # This DB exists only to prove frozen migrations work. Never package
+          # it into Setup.exe: the installed application keeps the customer's
+          # persistent database in the same runtime directory.
+          Remove-Item .\discount_parser.db, .\discount_parser.db-wal, .\discount_parser.db-shm -Force -ErrorAction SilentlyContinue
+          if (Test-Path .\discount_parser.db) { throw "Smoke database must not be packaged" }
 
       - name: Frozen smoke macOS
         if: runner.os == 'macOS'
