@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+NETWORK_POLICIES = {"auto", "direct", "proxy", "system"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,6 +16,7 @@ class SourceConfig:
     adapter: str
     base_url: str
     enabled: bool = True
+    network_policy: str = "auto"
 
 
 def _resolve_config_path(path: str | Path) -> Path:
@@ -25,6 +27,11 @@ def _resolve_config_path(path: str | Path) -> Path:
     if cwd_candidate.exists():
         return cwd_candidate
     return _PROJECT_ROOT / candidate
+
+
+def _network_policy(value: object) -> str:
+    policy = str(value or "auto").strip().lower()
+    return policy if policy in NETWORK_POLICIES else "auto"
 
 
 def load_source_configs(path: str | Path = "config/sources.yaml") -> list[SourceConfig]:
@@ -39,6 +46,7 @@ def load_source_configs(path: str | Path = "config/sources.yaml") -> list[Source
                 adapter=str(item["adapter"]),
                 base_url=str(item["base_url"]),
                 enabled=bool(item.get("enabled", True)),
+                network_policy=_network_policy(item.get("network_policy")),
             )
         )
     return result
@@ -60,5 +68,6 @@ def set_source_enabled(key: str, enabled: bool, path: str | Path = "config/sourc
                 adapter=str(item["adapter"]),
                 base_url=str(item["base_url"]),
                 enabled=bool(item["enabled"]),
+                network_policy=_network_policy(item.get("network_policy")),
             )
     raise KeyError(f"Unknown source: {key}")
