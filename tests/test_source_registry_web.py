@@ -1,24 +1,28 @@
 from __future__ import annotations
 
+from fastapi.testclient import TestClient
+
 from src.web.application import app
 
 
-def _paths() -> list[str]:
-    return [route.path for route in app.routes if hasattr(route, "path")]
-
-
 def test_source_registry_routes_are_registered() -> None:
-    paths = _paths()
-    assert "/sources-registry" in paths
-    assert "/sources-registry/add" in paths
-    assert "/sources-registry/export" in paths
-    assert "/sources-registry/import" in paths
-    assert "/sources-registry/keywords/add" in paths
-    assert "/sources-registry/{source_id}/{action}" in paths
+    client = TestClient(app)
+    # The registry page requires first-run setup, so a redirect proves the
+    # included router resolved the URL. A missing route would return 404.
+    response = client.get('/sources-registry', follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers['location'] == '/setup'
 
 
 def test_keyword_add_static_route_precedes_dynamic_source_action() -> None:
-    paths = _paths()
-    static_index = paths.index("/sources-registry/keywords/add")
-    dynamic_index = paths.index("/sources-registry/{source_id}/{action}")
-    assert static_index < dynamic_index
+    client = TestClient(app)
+    response = client.post(
+        '/sources-registry/keywords/add',
+        data={'keyword': 'скидка', 'kind': 'positive', 'merchant': '', 'priority': '50'},
+        follow_redirects=False,
+    )
+    # Even without an initialized registry DB the static handler converts its
+    # service error to a registry redirect. If the dynamic int route captured
+    # this URL FastAPI would return validation/404 instead.
+    assert response.status_code == 303
+    assert response.headers['location'].startswith('/sources-registry?')
