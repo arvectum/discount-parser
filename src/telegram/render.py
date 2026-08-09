@@ -35,6 +35,22 @@ def _summary(value: str | None, *, limit: int = 420) -> str | None:
     return clipped + "…"
 
 
+def _conditions(offer: Offer) -> str | None:
+    parts: list[str] = []
+    if offer.max_discount_amount is not None:
+        parts.append(f"скидка не более {_money(offer.max_discount_amount, offer.currency)}")
+    if offer.min_order_amount is not None:
+        parts.append(f"заказ от {_money(offer.min_order_amount, offer.currency)}")
+    explicit = _summary(offer.conditions, limit=320)
+    if explicit:
+        normalized = explicit.casefold()
+        structured = [part for part in parts if part.casefold() not in normalized]
+        if structured:
+            return explicit + "; " + "; ".join(structured)
+        return explicit
+    return "; ".join(parts) or None
+
+
 def render_offer_caption(offer: Offer) -> str:
     lines: list[str] = []
     title = escape(offer.display_title or offer.title)
@@ -64,9 +80,18 @@ def render_offer_caption(offer: Offer) -> str:
     if offer.promo_code:
         lines.append(f"🎁 Промокод: <code>{escape(offer.promo_code)}</code>")
 
-    geo_parts = [value for value in (offer.city, offer.region) if value]
-    if geo_parts:
-        lines.append(f"📍 {escape(', '.join(dict.fromkeys(geo_parts)))}")
+    condition_text = _conditions(offer)
+    if condition_text:
+        lines.append(f"📌 Условия: {escape(condition_text)}")
+
+    if offer.geo_scope == "all_russia":
+        lines.append("📍 Вся Россия")
+    else:
+        geo_parts = [value for value in (offer.city, offer.region) if value]
+        if geo_parts:
+            lines.append(f"📍 {escape(', '.join(dict.fromkeys(geo_parts)))}")
+        elif offer.geo_scope == "unknown":
+            lines.append("📍 ГЕО не указано")
 
     if offer.merchant:
         lines.append(f"🏪 Магазин: {escape(offer.merchant)}")
@@ -85,6 +110,4 @@ def offer_keyboard(offer: Offer) -> InlineKeyboardMarkup | None:
     url = (offer.canonical_url or "").strip()
     if not url.startswith(("http://", "https://")):
         return None
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="👉 Перейти к предложению", url=url)]]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👉 Перейти к предложению", url=url)]])
