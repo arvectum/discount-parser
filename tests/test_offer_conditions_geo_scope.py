@@ -57,7 +57,8 @@ def test_telegram_caption_shows_conditions_and_all_russia() -> None:
         currency="RUB",
     )
     caption = render_offer_caption(offer)
-    assert "📍 Вся Россия" in caption
+    assert "📍 ГЕО: Вся Россия" in caption
     assert "📌 Условия:" in caption
-    assert "1 000 ₽" in caption
-    assert "3 000 ₽" in caption
+    assert "не более 1000 ₽" in caption
+    assert "от 3000 ₽" in caption
+    assert caption.count("скидка не более") == 0
