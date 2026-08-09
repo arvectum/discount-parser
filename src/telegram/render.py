@@ -14,7 +14,6 @@ MAX_TITLE_CHARS = 110
 MAX_MERCHANT_CHARS = 80
 MAX_CATEGORY_CHARS = 100
 MAX_CONDITIONS_CHARS = 180
-TARGET_CAPTION_CHARS = 650
 
 
 def _money(value: Decimal | None, currency: str | None) -> str | None:
@@ -43,17 +42,14 @@ def _clip(value: str | None, *, limit: int) -> str | None:
 
 
 def _conditions(offer: Offer) -> str | None:
-    parts: list[str] = []
-    if offer.max_discount_amount is not None:
-        parts.append(f"скидка не более {_money(offer.max_discount_amount, offer.currency)}")
-    if offer.min_order_amount is not None:
-        parts.append(f"заказ от {_money(offer.min_order_amount, offer.currency)}")
     explicit = _clip(offer.conditions, limit=MAX_CONDITIONS_CHARS)
     if explicit:
-        normalized = explicit.casefold()
-        structured = [part for part in parts if part.casefold() not in normalized]
-        text = explicit + ("; " + "; ".join(structured) if structured else "")
-        return _clip(text, limit=MAX_CONDITIONS_CHARS)
+        return explicit
+    parts: list[str] = []
+    if offer.min_order_amount is not None:
+        parts.append(f"заказ от {_money(offer.min_order_amount, offer.currency)}")
+    if offer.max_discount_amount is not None:
+        parts.append(f"скидка не более {_money(offer.max_discount_amount, offer.currency)}")
     return _clip("; ".join(parts), limit=MAX_CONDITIONS_CHARS)
 
 
@@ -74,15 +70,6 @@ def _cashback_label(offer: Offer) -> str | None:
 
 
 def _headline(offer: Offer) -> str:
-    merchant = _clip(offer.merchant, limit=MAX_MERCHANT_CHARS)
-    discount = _discount_label(offer)
-    cashback = _cashback_label(offer)
-    if merchant and discount:
-        return _clip(f"{merchant} — скидка {discount}", limit=MAX_TITLE_CHARS) or "Скидка"
-    if merchant and cashback:
-        return _clip(f"{merchant} — кэшбэк {cashback}", limit=MAX_TITLE_CHARS) or "Кэшбэк"
-    if merchant and offer.promo_code:
-        return _clip(f"{merchant} — промокод", limit=MAX_TITLE_CHARS) or "Промокод"
     return _clip(offer.display_title or offer.title, limit=MAX_TITLE_CHARS) or "Предложение"
 
 
@@ -91,7 +78,7 @@ def _geo_label(offer: Offer) -> str:
         return "Вся Россия"
     geo_parts = [value for value in (offer.city, offer.region) if value]
     if geo_parts:
-        return ", ".join(dict.fromkeys(geo_parts))
+        return _clip(", ".join(dict.fromkeys(geo_parts)), limit=100) or "Не указано"
     return "Не указано"
 
 
@@ -143,10 +130,7 @@ def render_offer_caption(offer: Offer) -> str:
     if offer.promo_code:
         lines.append(f"🎁 Промокод: <code>{escape(_clip(offer.promo_code, limit=64) or '')}</code>")
 
-    caption = "\n".join(lines)
-    # The individual field limits above keep normal posts well below Telegram's
-    # caption limits and, more importantly, below our compact UX target.
-    return caption
+    return "\n".join(lines)
 
 
 def offer_keyboard(offer: Offer) -> InlineKeyboardMarkup | None:
