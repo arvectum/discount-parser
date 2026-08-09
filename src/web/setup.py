@@ -90,18 +90,17 @@ def is_setup_complete() -> bool:
     return all(values.get(key) for key in REQUIRED_TELEGRAM_KEYS)
 
 
-def save_telegram_setup(
+def validate_telegram_setup(
     *,
     bot_token: str,
     bot_name: str,
     channel_id: str,
     admin_ids: str,
-) -> None:
+) -> tuple[str, str, str, str]:
     bot_token = _single_line(bot_token, 'Токен Telegram-бота')
     bot_name = _single_line(bot_name, 'Имя бота')
     channel_id = _single_line(channel_id, 'Telegram-канал')
     admin_ids = _single_line(admin_ids, 'Telegram user ID')
-
     if ':' not in bot_token or len(bot_token) < 20:
         raise ValueError('Похоже, токен Telegram-бота указан неверно.')
     if not channel_id:
@@ -113,7 +112,22 @@ def save_telegram_setup(
             int(value.strip())
     except ValueError as exc:
         raise ValueError('Telegram user ID должен быть числом. Несколько ID разделяйте запятыми.') from exc
+    return bot_token, bot_name, channel_id, admin_ids
 
+
+def save_telegram_setup(
+    *,
+    bot_token: str,
+    bot_name: str,
+    channel_id: str,
+    admin_ids: str,
+) -> None:
+    bot_token, bot_name, channel_id, admin_ids = validate_telegram_setup(
+        bot_token=bot_token,
+        bot_name=bot_name,
+        channel_id=channel_id,
+        admin_ids=admin_ids,
+    )
     _write_env_values(
         {
             'DP_TELEGRAM_BOT_TOKEN': bot_token,
@@ -152,9 +166,15 @@ def save_telegram_collector_setup(
     )
 
 
+def validate_vk_setup(*, access_token: str = '', api_version: str = '5.199') -> tuple[str, str]:
+    return (
+        _single_line(access_token, 'VK access token'),
+        _single_line(api_version, 'VK API version') or '5.199',
+    )
+
+
 def save_vk_setup(*, access_token: str = '', api_version: str = '5.199') -> None:
-    access_token = _single_line(access_token, 'VK access token')
-    api_version = _single_line(api_version, 'VK API version') or '5.199'
+    access_token, api_version = validate_vk_setup(access_token=access_token, api_version=api_version)
     _write_env_values(
         {
             'DP_VK_ACCESS_TOKEN': access_token,
