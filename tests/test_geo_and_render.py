@@ -68,30 +68,71 @@ def test_publish_criteria_carries_geo_filter() -> None:
     assert criteria.limit == 7
 
 
-def test_richer_telegram_caption_contains_context_and_geo() -> None:
+def test_unified_telegram_caption_uses_structured_fields_only() -> None:
     offer = Offer(
         title="Кофемашина со скидкой",
-        description="Автоматическая кофемашина для дома. Скидка доступна при оформлении заказа на сайте магазина.",
+        description="Друзья! Огромный рекламный текст источника, который никогда не должен попадать в пост. " * 20,
         merchant="Магазин",
         city="Москва",
         region="Московская область",
         category="Бытовая техника",
+        subcategory="Кофемашины",
+        conditions="При заказе на сайте, скидка не более 5 000 ₽",
         old_price=Decimal("39990"),
         new_price=Decimal("29990"),
         discount_percent=Decimal("25"),
         promo_code="COFFEE25",
     )
     caption = render_offer_caption(offer)
-    assert "📝 Автоматическая кофемашина" in caption
-    assert "Цена:" in caption
-    assert "Скидка: <b>25%</b>" in caption
-    assert "📍 Москва, Московская область" in caption
-    assert "Магазин:" in caption
-    assert "COFFEE25" in caption
+    assert caption.startswith("<b>🔥 Магазин — скидка 25%</b>")
+    assert "🏪 Поставщик: Магазин" in caption
+    assert "💰 Цена:" in caption
+    assert "💸 Скидка: <b>25%</b>" in caption
+    assert "📂 Категория: Бытовая техника → Кофемашины" in caption
+    assert "📌 Условия: При заказе на сайте" in caption
+    assert "📍 ГЕО: Москва, Московская область" in caption
+    assert "🎁 Промокод: <code>COFFEE25</code>" in caption
+    assert "Друзья!" not in caption
+    assert "рекламный текст" not in caption
 
 
-def test_caption_summary_is_bounded() -> None:
-    offer = Offer(title="Товар", description="слово " * 200)
+def test_long_source_description_never_expands_publication() -> None:
+    offer = Offer(
+        title="Товар",
+        description=("Очень длинное объявление со всеми деталями, ссылками и рекламой. " * 500),
+        merchant="Поставщик",
+        discount_percent=Decimal("15"),
+        category="Дом и быт",
+        conditions="При заказе от 3 000 ₽; не суммируется с другими акциями",
+        geo_scope="all_russia",
+    )
     caption = render_offer_caption(offer)
-    assert len(caption) < 700
-    assert "…" in caption
+    assert len(caption) < 650
+    assert "Очень длинное объявление" not in caption
+    assert "Поставщик:" in caption
+    assert "Скидка:" in caption
+    assert "Категория:" in caption
+    assert "Условия:" in caption
+    assert "ГЕО: Вся Россия" in caption
+
+
+def test_same_structured_offer_has_same_shape_despite_source_verbosity() -> None:
+    short = Offer(
+        title="Акция",
+        description="Скидка 20%.",
+        merchant="Ритейлер",
+        discount_percent=Decimal("20"),
+        category="Продукты",
+        conditions="От 1 500 ₽",
+        geo_scope="all_russia",
+    )
+    verbose = Offer(
+        title="Акция",
+        description="Рекламный текст " * 300,
+        merchant="Ритейлер",
+        discount_percent=Decimal("20"),
+        category="Продукты",
+        conditions="От 1 500 ₽",
+        geo_scope="all_russia",
+    )
+    assert render_offer_caption(short) == render_offer_caption(verbose)
