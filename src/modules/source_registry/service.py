@@ -211,7 +211,7 @@ def review_candidate(
             "promo_aggregator": "legacy_adapter",
             "telegram": "telegram_public",
             "vk": "vk_api",
-            "dzen": "public_page",
+            "dzen": "dzen_public",
             "rutube": "rutube_public",
             "other": "public_page",
         }
@@ -341,7 +341,10 @@ def seed_default_keywords(session: Session) -> int:
 
 
 _PERCENT_RE = re.compile(r"(?:скидк\w*\s*)?(?:до\s*)?[−–-]?\s*(\d{1,2}(?:[.,]\d+)?)\s*%", re.IGNORECASE)
-_PROMO_RE = re.compile(r"(?:промокод|promo(?:\s*code)?|код)\s*[:\-–—]?\s*([A-ZА-ЯЁ0-9][A-ZА-ЯЁ0-9_-]{3,24})", re.IGNORECASE)
+_PROMO_RE = re.compile(
+    r"(?:промокод(?:у|а|ом|е|ы|ов)?|promo(?:\s*code)?|код)\s*[:\-–—]?\s*([A-ZА-ЯЁ0-9][A-ZА-ЯЁ0-9_-]{3,24})",
+    re.IGNORECASE,
+)
 _PRICE_RE = re.compile(r"(?<!\d)(\d{1,3}(?:[\s\u00a0]\d{3})+|\d{3,7})(?:[.,]\d{1,2})?\s*(?:₽|руб(?:\.|лей|ля)?)", re.IGNORECASE)
 
 
