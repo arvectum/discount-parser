@@ -12,7 +12,7 @@ from src.shared.db import create_session
 from src.telegram.render import offer_keyboard, render_offer_caption
 
 
-PUBLICATION_TEMPLATE_VERSION = "v2"
+PUBLICATION_TEMPLATE_VERSION = "v2-configurable"
 
 
 @dataclass(frozen=True, slots=True)
