@@ -109,7 +109,7 @@ jobs:
           cp alembic.ini delivery/app/alembic.ini
           cp .env.example delivery/app/.env.example
           cp packaging/macos/install.command delivery/install.command
-          chmod +x delivery/install.command delivery/app/DiscountParser
+          chmod +x delivery/install.command delivery/app/DiscountParser packaging/macos/build_dmg.sh
 
       - name: Frozen smoke Windows
         if: runner.os == 'Windows'
@@ -128,6 +128,14 @@ jobs:
         run: |
           ./DiscountParser migrate
           ./DiscountParser doctor
+
+      - name: Build macOS DMG
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bash packaging/macos/build_dmg.sh
+          test -f "delivery/DiscountParser.dmg"
+          test -x "delivery/Discount Parser.app/Contents/MacOS/DiscountParserLauncher"
 
       - name: Build native Windows installer
         if: runner.os == 'Windows'
