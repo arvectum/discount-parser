@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.shared.config import get_settings
-from src.web import onboarding_routes, setup as web_setup
+from src.web import onboarding_routes
 from src.web.application import app
 
 
@@ -15,8 +15,8 @@ def isolated_onboarding_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     env_path = tmp_path / '.env'
     example_path = tmp_path / '.env.example'
     example_path.write_text('DP_DATABASE_URL=sqlite:///./discount_parser.db\n', encoding='utf-8')
-    monkeypatch.setattr(web_setup, 'ENV_PATH', env_path)
-    monkeypatch.setattr(web_setup, 'ENV_EXAMPLE_PATH', example_path)
+    monkeypatch.setenv('DP_RUNTIME_ROOT', str(tmp_path))
+    monkeypatch.delenv('DP_ENV_FILE', raising=False)
     get_settings.cache_clear()
     yield env_path
     get_settings.cache_clear()
