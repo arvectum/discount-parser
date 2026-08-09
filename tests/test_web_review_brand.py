@@ -32,7 +32,8 @@ def test_review_page_approves_offer_and_persists_manual_overrides(review_db) -> 
     with create_session() as session:
         offer = Offer(
             title='Скидка на кофе',
-            description='Скидка 20% по промокоду, действует в Москве',
+            description='Скидка 20% по промокоду, действует в Москве ' + ('рекламный текст ' * 80),
+            merchant='Кофейня',
             status='needs_review',
             category='Другое',
             subcategory='Не определено',
@@ -49,6 +50,10 @@ def test_review_page_approves_offer_and_persists_manual_overrides(review_db) -> 
     assert page.status_code == 200
     assert 'Проверка предложений' in page.text
     assert 'Одобрить → ready' in page.text
+    assert 'Как будет выглядеть публикация' in page.text
+    assert '🏪 Поставщик: Кофейня' in page.text
+    assert '💸 Скидка: <b>20%</b>' in page.text
+    assert 'Полный текст источника в Telegram не копируется' in page.text
     assert 'ООО «Арвектум»' in page.text
     assert 'ИНН 7716261422' in page.text
     assert '<svg' in page.text
