@@ -49,9 +49,11 @@ class Offer(Base):
     __table_args__ = (
         CheckConstraint("offer_type IN ('promo','discount','cashback','delivery','other')", name="ck_offers_offer_type"),
         CheckConstraint("status IN ('new','ready','needs_review','published','expired','rejected')", name="ck_offers_status"),
+        CheckConstraint("geo_scope IN ('all_russia','region','city','unknown')", name="ck_offers_geo_scope"),
         Index("ix_offers_status", "status"),
         Index("ix_offers_category", "category", "subcategory"),
         Index("ix_offers_geo", "region", "city"),
+        Index("ix_offers_geo_scope", "geo_scope"),
         Index("ix_offers_valid_until", "valid_until"),
         Index("ix_offers_canonical_url", "canonical_url"),
         Index("ix_offers_fingerprint", "fingerprint"),
@@ -67,8 +69,12 @@ class Offer(Base):
     brand: Mapped[str | None] = mapped_column(String(255))
     category: Mapped[str | None] = mapped_column(String(255))
     subcategory: Mapped[str | None] = mapped_column(String(255))
+    geo_scope: Mapped[str] = mapped_column(String(32), default="unknown", nullable=False)
     city: Mapped[str | None] = mapped_column(String(255))
     region: Mapped[str | None] = mapped_column(String(255))
+    conditions: Mapped[str | None] = mapped_column(Text)
+    max_discount_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    min_order_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     promo_code: Mapped[str | None] = mapped_column(String(255))
     discount_percent: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
     discount_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
@@ -99,7 +105,6 @@ class OfferSourceObservation(Base):
         UniqueConstraint("source_id", "external_id", name="uq_observation_source_external_id"),
         Index("ix_observations_offer_source", "offer_id", "source_id"),
     )
-
     id: Mapped[int] = mapped_column(primary_key=True)
     offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id", ondelete="CASCADE"), nullable=False)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"), nullable=False)
@@ -108,7 +113,6 @@ class OfferSourceObservation(Base):
     raw_title: Mapped[str | None] = mapped_column(Text)
     raw_payload_json: Mapped[str | None] = mapped_column(Text)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-
     offer: Mapped[Offer] = relationship(back_populates="observations")
     source: Mapped[Source] = relationship()
 
@@ -116,7 +120,6 @@ class OfferSourceObservation(Base):
 class ParseRun(Base):
     __tablename__ = "parse_runs"
     __table_args__ = (CheckConstraint("status IN ('running','success','partial','failed')", name="ck_parse_runs_status"),)
-
     id: Mapped[int] = mapped_column(primary_key=True)
     source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id", ondelete="SET NULL"))
     status: Mapped[str] = mapped_column(String(32), default="running", nullable=False)
@@ -134,7 +137,6 @@ class ParseRun(Base):
 class ClassificationRule(Base):
     __tablename__ = "classification_rules"
     __table_args__ = (Index("ix_classification_rules_priority", "enabled", "priority"),)
-
     id: Mapped[int] = mapped_column(primary_key=True)
     match_key: Mapped[str] = mapped_column(String(255), nullable=False)
     match_value: Mapped[str] = mapped_column(Text, nullable=False)
@@ -149,7 +151,6 @@ class ClassificationRule(Base):
 class ManualOverride(Base):
     __tablename__ = "manual_overrides"
     __table_args__ = (UniqueConstraint("offer_id", "field_name", name="uq_manual_override_offer_field"),)
-
     id: Mapped[int] = mapped_column(primary_key=True)
     offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id", ondelete="CASCADE"), nullable=False)
     field_name: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -157,7 +158,6 @@ class ManualOverride(Base):
     source: Mapped[str] = mapped_column(String(50), default="manual", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
-
     offer: Mapped[Offer] = relationship(back_populates="overrides")
 
 
@@ -167,7 +167,6 @@ class Publication(Base):
         UniqueConstraint("offer_id", "channel_id", name="uq_publication_offer_channel"),
         CheckConstraint("status IN ('pending','published','failed','skipped')", name="ck_publications_status"),
     )
-
     id: Mapped[int] = mapped_column(primary_key=True)
     offer_id: Mapped[int] = mapped_column(ForeignKey("offers.id", ondelete="CASCADE"), nullable=False)
     channel_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -177,13 +176,11 @@ class Publication(Base):
     error: Mapped[str | None] = mapped_column(Text)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-
     offer: Mapped[Offer] = relationship(back_populates="publications")
 
 
 class PublishFilter(Base):
     __tablename__ = "publish_filters"
-
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
