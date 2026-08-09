@@ -1,6 +1,6 @@
 # R10 — Source Registry & multi-platform collection
 
-Status: **CODE IMPLEMENTED ON FEATURE BRANCH — LOCAL QA/LIVE ACCEPTANCE REQUIRED**
+Status: **CODE IMPLEMENTED — CROSS-PLATFORM CI AND DELIVERY GATES AVAILABLE**
 
 Branch:
 
@@ -8,46 +8,34 @@ Branch:
 feature/source-registry-multiplatform
 ```
 
-This branch must not be merged into `main` until the local unpushed release-preflight commit is reconciled and the combined tree passes local QA.
+The branch remains unmerged only because the developer machine still has the local release-preflight commit `ace21cc` that must be reconciled first. The repository is now public, so GitHub-hosted Actions is usable again.
 
 ## Goal
 
-The parser is no longer limited conceptually to five promo-code aggregators. A persisted source registry now supports known sources from:
+Discount Parser is no longer limited to five promo-code aggregators. A persisted registry supports:
 
 - promo aggregators;
-- ordinary merchant websites and promotion pages;
+- merchant websites and promotion pages;
 - public Telegram channels;
 - VK communities via API;
 - Dzen public pages;
-- Rutube public channel/video metadata;
-- future collector types without replacing the existing Offer pipeline.
+- Rutube public metadata;
+- future collector types without changing the Offer core pipeline.
 
-## Pipeline
+## Pipelines
 
-Structured legacy promo adapters remain unchanged:
-
-```text
-legacy adapter
-→ RawOffer
-→ normalization
-→ deduplication
-→ classification
-→ Offer
-```
-
-New content-oriented sources use:
+Legacy structured sources remain:
 
 ```text
-RegisteredSource
-→ SourceCollector
-→ SourceItem
-→ deterministic OfferSignal
-→ RawOffer
-→ existing normalization/dedup/classification
-→ Offer
+legacy adapter → RawOffer → normalization → deduplication → classification → Offer
 ```
 
-The registry therefore does not create a second Offer model or parallel persistence pipeline.
+Content-oriented sources use:
+
+```text
+RegisteredSource → SourceCollector → SourceItem → deterministic OfferSignal
+→ RawOffer → existing normalization/dedup/classification → Offer
+```
 
 ## Persisted models
 
@@ -59,101 +47,76 @@ Migration `0002_source_registry` adds:
 - `source_candidates`;
 - `source_items`.
 
-`RegisteredSource` stores management metadata and health state. Credentials are not stored in this table.
+Credentials are deliberately not stored in `RegisteredSource`.
 
-`SourceItem` stores platform-level posts/pages before offer extraction, providing idempotency and debugging.
+## Existing aggregators
 
-`SourceCandidate` separates discovery from production collection: discovered URLs/channels must be approved before becoming active registered sources.
-
-## Existing promo aggregators
-
-`registry-seed` mirrors the five configured YAML adapters into the registry as `promo_aggregator / legacy_adapter` records.
-
-They are intentionally not fetched through the new registry runner. The established `src.sources.runner` remains authoritative, preventing double collection and preserving existing regression coverage.
+`registry-seed` mirrors the five YAML adapters into the registry as `promo_aggregator / legacy_adapter` records. They remain collected by the established legacy runner and are not fetched twice by the registry runner.
 
 ## Collectors
 
-Implemented collector contracts:
+Implemented contracts:
 
-- `generic_web` — one known merchant/promotion page;
-- `telegram_public` — public `t.me/s/<channel>` preview posts, no user credentials;
-- `vk_api` — VK wall API, requires optional `DP_VK_ACCESS_TOKEN`;
-- `dzen_public` — public-page compatibility collector;
-- `rutube_public` — public channel/video metadata compatibility collector;
-- `public_page` — generic compatibility fallback.
+- `generic_web`;
+- `telegram_public` for `t.me/s/<channel>` previews without credentials;
+- `vk_api`, requiring optional `DP_VK_ACCESS_TOKEN`;
+- `dzen_public`;
+- `rutube_public`;
+- `public_page` fallback.
 
-Collectors have bounded item count, HTTP timeout, redirect handling and response-size limits.
+Collectors use bounded item counts, timeouts, redirect handling and maximum response sizes.
 
-### Telegram limitation
+### Telegram
 
-`telegram_public` is not an MTProto history client. It covers channels available through Telegram's public web preview. Private channels, unavailable previews or deeper authenticated history require a future authenticated MTProto collector/session.
+Publishing/control-bot credentials are independent from collection credentials. Public Telegram channels require no extra credentials. MTProto API ID/API Hash can be stored by onboarding, but authenticated MTProto session creation is intentionally not claimed as complete yet.
 
-Publishing-bot credentials remain independent from collector credentials.
+### VK
 
-### VK limitation
-
-VK collection is credential-dependent. An enabled `vk_api` source without a token becomes `requires_credentials`; Doctor reports this as an actionable optional warning rather than breaking unrelated sources.
-
-### Dzen / Rutube
-
-Current collectors deliberately use public-page compatibility contracts. Their exact live HTML/API surfaces must be tested on the target network. A stable public JSON/RSS/API endpoint may replace collector internals later without schema changes.
+VK is optional. An enabled `vk_api` source without a token becomes an actionable credential warning instead of breaking unrelated collection.
 
 ## Discovery
 
-`discover-merchant` implements bounded merchant-page discovery:
-
-- starts from one known merchant homepage;
-- same domain only;
-- depth 1;
-- maximum candidate count;
-- searches promo/sale/action/discount/special path/text hints;
-- creates `SourceCandidate`, not active sources.
-
-It is intentionally not a general internet crawler.
-
-## Deterministic offer detection
-
-`SourceItem` text is scored by explicit evidence:
-
-- strong discount/promo keywords;
-- promo-code pattern;
-- discount percentage;
-- old/new price pattern;
-- cashback/delivery terms;
-- negative keywords such as review/unboxing reducing confidence.
-
-No LLM is required.
-
-The threshold is conservative: weak editorial mentions should not automatically become Offers.
+`discover-merchant` performs bounded same-domain discovery of likely promotion/sale/action pages and writes `SourceCandidate` records. Candidates must be approved before becoming active registered sources.
 
 ## Source management UI
-
-New page:
 
 ```text
 /sources-registry
 ```
 
-Supports:
+Supports listing, add, enable/disable, test-now, candidate approval/rejection, keyword management and XLSX import/export.
 
-- listing all registered platforms;
-- enable/disable;
-- test one non-legacy source;
-- add source;
-- view health/error state;
-- approve/reject discovered candidates;
-- add/toggle keywords;
-- XLSX import/export.
+## Guided onboarding
+
+Interactive setup now uses:
+
+```text
+/onboarding/1 .. /onboarding/5
+```
+
+Legacy `GET /setup` redirects to the wizard while legacy `POST /setup` remains backward-compatible.
+
+Wizard steps:
+
+1. Telegram publishing/control bot: Bot Token, optional display name, channel and admin ID. Includes live Bot API connection check without rendering the secret back to the browser.
+2. Telegram collection: public mode without credentials, or storage of MTProto API ID/API Hash for later authenticated-session activation.
+3. VK: optional token, skip action and API connectivity test.
+4. Source capability summary: promo sites, merchant sites, Telegram, VK, Dzen and Rutube.
+5. Doctor summary: required versus optional checks and packaged-app start action.
+
+Secrets are stored locally through the existing atomic `.env` writer. New integration fields are single-line validated and are not shown again after saving.
+
+In a frozen client build, completing onboarding starts bot and scheduler best-effort and opens the dashboard. Optional integration failures do not block application startup.
 
 ## Registry XLSX
 
-Export file includes sheets:
+Export contains:
 
 - `sources`;
 - `candidates`;
 - `keywords`.
 
-This is the intended mechanism for building and maintaining a large initial source database without hardcoding hundreds of stores into application releases.
+This is the intended way to maintain a large source database without hardcoding hundreds of stores in releases.
 
 ## CLI
 
@@ -166,71 +129,41 @@ python -m src.cli registry-import path/to/sources_registry.xlsx
 python -m src.cli discover-merchant --merchant "Store" --url https://store.example/
 ```
 
-## Scheduler
-
-Scheduled collection still runs the five established legacy sources first. It then runs enabled non-legacy registry sources.
-
-Registry-level failure is isolated and cannot prevent the legacy collection job from completing.
-
 ## Doctor
 
-Doctor now verifies:
+Doctor verifies legacy source configuration, registry schema, collector names, data directory/database and credential requirements for enabled collectors. Telegram publishing credentials and social credentials remain optional warnings until configured.
 
-- legacy source config and adapter registry;
-- source-registry schema exists;
-- registered collector names are valid;
-- social credentials required by enabled collectors are present or reported as optional warnings.
+## Packaging
 
-## Frozen delivery
+Windows and macOS PyInstaller builds explicitly package the source-registry modules and onboarding router. Windows keeps separate `DiscountParser.exe` UI and `DiscountParserWorker.exe` worker executables.
 
-Windows/macOS build definitions and local build scripts explicitly include the new registry web modules and collect the `src.modules.source_registry` package.
+## Automated QA
 
-Migration commands seed the default keywords and mirror legacy sources after upgrading the database.
+The feature branch has cross-platform GitHub Actions gates for:
 
-## Automated regression coverage added
+- Ubuntu;
+- Windows;
+- macOS ARM64;
+- macOS Intel.
 
-Tests cover:
+The normal CI gate runs compile, pytest, Alembic/Doctor and CLI smoke. The delivery gate builds frozen executables, runs frozen migration/Doctor and builds the Windows Inno Setup installer.
 
-- registry seed idempotency;
-- SourceItem idempotency by platform external ID;
-- candidate approval;
-- deterministic offer-signal extraction;
-- negative keyword behavior;
-- collector registry;
-- fixture parsing for generic web, Telegram public, Dzen and Rutube;
-- source-registry web route registration/precedence;
-- Alembic head requiring registry tables.
+Onboarding regression tests cover legacy `/setup` redirection, Telegram setting persistence, secret non-echo, public Telegram mode without credentials, MTProto credential validation, VK skip behavior and the six-platform source summary.
 
-These tests have been committed remotely but still require execution on the local combined tree because GitHub-hosted Actions quota is exhausted.
+## Remaining external acceptance
 
-## Required local acceptance before merge
+Before release, reconcile local commit `ace21cc`, then perform live tests on the combined tree for:
 
-The local machine must reconcile its unpushed release-preflight commit with this branch, then run:
+- ordinary merchant website;
+- public Telegram channel;
+- Dzen;
+- Rutube;
+- VK when a token is available;
+- real Telegram publishing/control bot credentials and one controlled channel publication;
+- packaged first-run UI and update-preservation test on the target machine.
 
-```text
-compile
-full pytest
-preflight
-fresh Alembic migration
-upgrade/migration smoke
-Doctor
-frozen macOS build
-frozen migration
-frozen Doctor
-```
-
-Then live-test at least:
-
-- one ordinary merchant website;
-- one public Telegram channel;
-- one Dzen source;
-- one Rutube source;
-- VK if credentials are available.
-
-The existing four currently reachable promo aggregators should be rerun as regression; `promokodi_net_ru` remains a separately documented HTTP 403 access issue until investigated.
+`promokodi_net_ru` remains a separately documented HTTP 403 access issue unless a stable public access path is confirmed.
 
 ## Merge rule
 
-Do not tag `v1.0.0` from this branch.
-
-Merge only after the local release-preflight changes and R10 are combined and the resulting tree has zero test failures. Full client release still requires Telegram publishing acceptance and packaged UI/fresh-install acceptance.
+Do not tag `v1.0.0` until the local release-preflight commit is reconciled and live Telegram/delivery acceptance is complete.
