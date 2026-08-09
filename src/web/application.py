@@ -9,7 +9,7 @@ from starlette.responses import PlainTextResponse, RedirectResponse, Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from src.web.app import app
-from src.web.brand import BRAND_STYLE, brand_footer, brand_header
+from src.web.brand_v2 import BRAND_STYLE, brand_footer, brand_header
 from src.web.management_pages import router as management_router
 from src.web.network_routes import router as network_router
 from src.web.onboarding_routes import router as onboarding_router
@@ -19,6 +19,7 @@ from src.web.setup import is_setup_complete
 from src.web.source_registry_static_routes import router as source_registry_static_router
 from src.web.source_registry_routes import router as source_registry_router
 from src.web.system_routes import router as system_router
+from src.web.ux_routes import router as ux_router
 
 app.include_router(management_router)
 app.include_router(review_router)
@@ -27,12 +28,11 @@ app.include_router(source_registry_router)
 app.include_router(system_router)
 app.include_router(network_router)
 app.include_router(onboarding_router)
+app.include_router(ux_router)
 
 _LOCAL_HOSTS = {'127.0.0.1', 'localhost', '::1'}
 _MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 _BRAND_PATCH_STYLE = '<style>.arv-header svg{display:block;width:210px;max-width:48vw;height:auto}</style>'
-_LEGAL_ADDRESS_SHORT = '129337, г. Москва, Ярославское ш., д. 107, к. 2, кв. 75'
-_LEGAL_ADDRESS_FULL = '129337, г. Москва, вн. тер. г. муниципальный округ Ярославский, ш. Ярославское, д. 107, к. 2, кв. 75'
 
 
 def _is_local_url(value: str) -> bool:
@@ -46,6 +46,12 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method == 'GET' and request.url.path == '/setup':
             return RedirectResponse('/onboarding/1', status_code=303)
+
+        # Keep the old detailed dashboard available at /advanced, but make the
+        # customer-facing root open the task-oriented home page.
+        if request.method == 'GET' and request.url.path == '/' and is_setup_complete():
+            suffix = f'?{request.url.query}' if request.url.query else ''
+            return RedirectResponse('/home' + suffix, status_code=303)
 
         if request.method in _MUTATING_METHODS:
             origin = request.headers.get('origin')
@@ -88,8 +94,7 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
             if body_end >= 0:
                 text = text[:body_end + 1] + brand_header(request.url.path) + text[body_end + 1:]
         if '</body>' in text and 'class="arv-footer"' not in text:
-            footer = brand_footer().replace(_LEGAL_ADDRESS_SHORT, _LEGAL_ADDRESS_FULL)
-            text = text.replace('</body>', footer + '</body>', 1)
+            text = text.replace('</body>', brand_footer() + '</body>', 1)
         headers = dict(response.headers)
         headers.pop('content-length', None)
         return Response(content=text, status_code=response.status_code, headers=headers, media_type='text/html')
