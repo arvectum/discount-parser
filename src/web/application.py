@@ -30,6 +30,9 @@ app.include_router(onboarding_router)
 
 _LOCAL_HOSTS = {'127.0.0.1', 'localhost', '::1'}
 _MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
+_BRAND_PATCH_STYLE = '<style>.arv-header svg{display:block;width:210px;max-width:48vw;height:auto}</style>'
+_LEGAL_ADDRESS_SHORT = '129337, г. Москва, Ярославское ш., д. 107, к. 2, кв. 75'
+_LEGAL_ADDRESS_FULL = '129337, г. Москва, вн. тер. г. муниципальный округ Ярославский, ш. Ярославское, д. 107, к. 2, кв. 75'
 
 
 def _is_local_url(value: str) -> bool:
@@ -75,16 +78,18 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
             body += chunk
         text = body.decode('utf-8')
         if 'id="arvectum-brand-style"' not in text:
+            brand_css = BRAND_STYLE + _BRAND_PATCH_STYLE
             if '</head>' in text:
-                text = text.replace('</head>', BRAND_STYLE + '</head>', 1)
+                text = text.replace('</head>', brand_css + '</head>', 1)
             else:
-                text = BRAND_STYLE + text
+                text = brand_css + text
         if '<body' in text and 'class="arv-header"' not in text:
             body_end = text.find('>', text.find('<body'))
             if body_end >= 0:
                 text = text[:body_end + 1] + brand_header(request.url.path) + text[body_end + 1:]
         if '</body>' in text and 'class="arv-footer"' not in text:
-            text = text.replace('</body>', brand_footer() + '</body>', 1)
+            footer = brand_footer().replace(_LEGAL_ADDRESS_SHORT, _LEGAL_ADDRESS_FULL)
+            text = text.replace('</body>', footer + '</body>', 1)
         headers = dict(response.headers)
         headers.pop('content-length', None)
         return Response(content=text, status_code=response.status_code, headers=headers, media_type='text/html')
