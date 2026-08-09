@@ -26,4 +26,5 @@ def test_user_guide_has_windows_and_linux_install_sections() -> None:
     assert 'DiscountParser-Setup.exe' in guide
     assert '## 4. Установка на сервер Linux' in guide
     assert 'discount-parser-web.service' in guide
+    assert 'DP_ENV_FILE=/var/lib/discount-parser/.env' in guide
     assert 'ssh -L 8765:127.0.0.1:8765' in guide

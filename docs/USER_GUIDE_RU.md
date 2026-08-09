@@ -106,6 +106,7 @@ sudo -u discountparser cp .env.example /var/lib/discount-parser/.env.example
 cd /opt/discount-parser
 sudo -u discountparser env \
   DP_RUNTIME_ROOT=/var/lib/discount-parser \
+  DP_ENV_FILE=/var/lib/discount-parser/.env \
   DP_DATABASE_URL=sqlite:////var/lib/discount-parser/discount_parser.db \
   .venv/bin/python -m src.distribution_entry migrate
 ```
@@ -131,6 +132,7 @@ Type=simple
 User=discountparser
 WorkingDirectory=/opt/discount-parser
 Environment=DP_RUNTIME_ROOT=/var/lib/discount-parser
+Environment=DP_ENV_FILE=/var/lib/discount-parser/.env
 Environment=DP_DATABASE_URL=sqlite:////var/lib/discount-parser/discount_parser.db
 ExecStart=/opt/discount-parser/.venv/bin/python -m src.distribution_entry web
 Restart=on-failure
@@ -216,6 +218,7 @@ sudo -u discountparser /opt/discount-parser/.venv/bin/pip install \
 cd /opt/discount-parser
 sudo -u discountparser env \
   DP_RUNTIME_ROOT=/var/lib/discount-parser \
+  DP_ENV_FILE=/var/lib/discount-parser/.env \
   DP_DATABASE_URL=sqlite:////var/lib/discount-parser/discount_parser.db \
   .venv/bin/python -m src.distribution_entry migrate
 
