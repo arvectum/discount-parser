@@ -8,12 +8,16 @@ from src.sources.adapters.promokodik import PromokodikAdapter
 from src.sources.adapters.promokodi_net_ru import PromokodiNetRuAdapter
 from src.sources.adapters.promokood import PromokoodAdapter
 from src.sources.config import SourceConfig
+from src.sources.http import HttpClient
 
 AdapterFactory = Callable[[SourceConfig], object]
 
 
 def _factory(adapter_cls):
-    return lambda config: adapter_cls(config.base_url)
+    return lambda config: adapter_cls(
+        config.base_url,
+        client=HttpClient(network_policy=config.network_policy),
+    )
 
 
 ADAPTER_REGISTRY: dict[str, AdapterFactory] = {
