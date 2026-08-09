@@ -10,11 +10,12 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from src.modules.offers.models import Offer
 
 
-def _money(value: Decimal | None, currency: str) -> str | None:
+def _money(value: Decimal | None, currency: str | None) -> str | None:
     if value is None:
         return None
     amount = f"{value:,.2f}".replace(",", " ").replace(".00", "")
-    symbol = "₽" if currency.upper() == "RUB" else currency.upper()
+    code = (currency or "RUB").upper()
+    symbol = "₽" if code == "RUB" else code
     return f"{amount} {symbol}".strip()
 
 
