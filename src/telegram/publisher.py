@@ -27,9 +27,11 @@ def _reserve_publication(offer_id: int, channel_id: str) -> tuple[Offer | None, 
         offer = session.get(Offer, offer_id)
         if offer is None:
             return None, None, "offer_not_found"
-        if offer.status != "ready":
-            return offer, None, f"offer_not_publishable:{offer.status}"
 
+        # Duplicate reservation must take precedence over the current Offer
+        # status. A successful first publication marks the Offer published, so
+        # checking readiness first would incorrectly return not_publishable on
+        # a repeated request instead of the durable duplicate result.
         existing = (
             session.query(Publication)
             .filter(Publication.offer_id == offer_id, Publication.channel_id == channel_id)
@@ -37,6 +39,9 @@ def _reserve_publication(offer_id: int, channel_id: str) -> tuple[Offer | None, 
         )
         if existing is not None:
             return offer, existing, "already_reserved"
+
+        if offer.status != "ready":
+            return offer, None, f"offer_not_publishable:{offer.status}"
 
         # "pending" is the durable reservation state defined by the schema.
         # Creating the row before the Telegram network call preserves the
