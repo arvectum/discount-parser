@@ -43,7 +43,7 @@ def test_root_redirects_to_simplified_home(ux_db) -> None:
     assert response.headers['location'] == '/home'
 
 
-def test_home_exposes_three_step_workflow_not_technical_dashboard(ux_db) -> None:
+def test_home_exposes_three_step_workflow_and_visible_geo(ux_db) -> None:
     client = TestClient(app)
     response = client.get('/home')
     assert response.status_code == 200
@@ -57,6 +57,11 @@ def test_home_exposes_three_step_workflow_not_technical_dashboard(ux_db) -> None
     assert 'Главная' in response.text
     assert 'Настройки' in response.text
     assert 'Помощь' in response.text
+    assert 'Регион (необязательно)' in response.text
+    assert 'Город (необязательно)' in response.text
+    assert 'Оставьте оба поля пустыми' in response.text
+    assert '<details>' not in response.text
+    assert '<summary>Ограничить сбор городом или регионом</summary>' not in response.text
 
 
 def test_settings_groups_advanced_features(ux_db) -> None:
@@ -70,12 +75,16 @@ def test_settings_groups_advanced_features(ux_db) -> None:
     assert 'Расширенная панель' in response.text
 
 
-def test_help_and_compact_footer_use_requested_arvectum_copy(ux_db) -> None:
+def test_help_covers_windows_macos_linux_and_compact_footer(ux_db) -> None:
     client = TestClient(app)
     response = client.get('/help')
     assert response.status_code == 200
-    assert 'Первая установка на Mac' in response.text
-    assert 'Собрать → Проверить → Опубликовать' not in response.text  # embedded help uses headings instead
+    assert 'Установка на Windows' in response.text
+    assert 'DiscountParser-Setup.exe' in response.text
+    assert 'Установка на macOS' in response.text
+    assert 'Установка на Linux-сервер' in response.text
+    assert 'systemd' in response.text
+    assert 'ssh -L 8765:127.0.0.1:8765' in response.text
     assert 'ИИ-Автоматизация' in response.text
     assert 'ИНН 7716261422' in response.text
     assert 'ОГРН 1267700213725' in response.text
