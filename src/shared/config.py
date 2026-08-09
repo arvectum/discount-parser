@@ -37,6 +37,7 @@ class Settings(BaseSettings):
 
     # Optional source-collection integrations. They are intentionally separate
     # from the Telegram publishing bot credentials.
+    telegram_collector_mode: str = "public"
     telegram_collector_api_id: str | None = None
     telegram_collector_api_hash: str | None = None
     telegram_collector_session: str | None = None
