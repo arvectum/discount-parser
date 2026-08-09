@@ -4,12 +4,13 @@ import sys
 from urllib.parse import urlparse
 
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse, Response
+from starlette.responses import PlainTextResponse, RedirectResponse, Response
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from src.web.app import app
 from src.web.management_pages import router as management_router
+from src.web.onboarding_routes import router as onboarding_router
 from src.web.processes import process_manager
 from src.web.setup import is_setup_complete
 from src.web.source_registry_static_routes import router as source_registry_static_router
@@ -20,6 +21,7 @@ app.include_router(management_router)
 app.include_router(source_registry_static_router)
 app.include_router(source_registry_router)
 app.include_router(system_router)
+app.include_router(onboarding_router)
 
 _LOCAL_HOSTS = {'127.0.0.1', 'localhost', '::1'}
 _MUTATING_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
@@ -34,6 +36,11 @@ def _is_local_url(value: str) -> bool:
 
 class LocalControlMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        # Keep the legacy /setup route backward-compatible for POST/API tests,
+        # but send users to the new guided wizard for interactive GET requests.
+        if request.method == 'GET' and request.url.path == '/setup':
+            return RedirectResponse('/onboarding/1', status_code=303)
+
         if request.method in _MUTATING_METHODS:
             origin = request.headers.get('origin')
             referer = request.headers.get('referer')
@@ -44,9 +51,8 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
 
-        # In the installed client build, successful first-run setup should make
-        # the application operational immediately. Source/development mode
-        # remains explicit and does not spawn external processes automatically.
+        # Legacy /setup still starts packaged services for backward-compatible
+        # callers. The onboarding wizard performs the same action on /finish.
         if (
             request.method == 'POST'
             and request.url.path == '/setup'
@@ -58,7 +64,6 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
                 try:
                     process_manager.start(name)
                 except Exception:
-                    # The System page exposes state/logs and allows retry.
                     pass
 
         if request.url.path != '/' or response.headers.get('content-type', '').split(';')[0] != 'text/html':
@@ -75,6 +80,7 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
               <a class="btn secondary" href="/offers">Предложения</a>
               <a class="btn secondary" href="/runs">Журнал</a>
               <a class="btn secondary" href="/system">Система</a>
+              <a class="btn secondary" href="/onboarding/1">Интеграции</a>
             </div>'''
             text = text.replace('<div class="wrap">', '<div class="wrap">' + nav, 1)
         headers = dict(response.headers)
