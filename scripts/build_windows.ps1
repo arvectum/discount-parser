@@ -44,6 +44,11 @@ Push-Location delivery\app
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 .\DiscountParserWorker.exe doctor
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# The frozen smoke database validates migrations only. It must never be
+# shipped in the installer, otherwise an update could overwrite or shadow the
+# customer's persistent SQLite database in %LOCALAPPDATA%\DiscountParser.
+Remove-Item .\discount_parser.db, .\discount_parser.db-wal, .\discount_parser.db-shm -Force -ErrorAction SilentlyContinue
+if (Test-Path .\discount_parser.db) { throw "Smoke database must not be packaged" }
 Pop-Location
 
 $Iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
