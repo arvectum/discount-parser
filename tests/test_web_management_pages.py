@@ -28,7 +28,7 @@ def web_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_management_routes_are_registered() -> None:
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in app.routes if hasattr(route, 'path')}
     assert '/offers' in paths
     assert '/offers/{offer_id}' in paths
     assert '/runs' in paths
