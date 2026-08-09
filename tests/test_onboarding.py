@@ -29,7 +29,10 @@ def test_legacy_setup_get_redirects_to_onboarding(isolated_onboarding_env: Path)
     assert response.headers['location'] == '/onboarding/1'
 
 
-def test_onboarding_step_one_saves_required_telegram_settings(isolated_onboarding_env: Path) -> None:
+def test_onboarding_step_one_saves_required_telegram_settings(
+    isolated_onboarding_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(onboarding_routes, '_test_telegram', lambda token, channel: (True, 'Telegram OK'))
     client = TestClient(app)
     response = client.post(
         '/onboarding/1',
@@ -48,6 +51,26 @@ def test_onboarding_step_one_saves_required_telegram_settings(isolated_onboardin
     assert 'DP_TELEGRAM_BOT_TOKEN=123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ' in text
     assert 'DP_TELEGRAM_CHANNEL_ID=@deals_channel' in text
     assert 'DP_TELEGRAM_ADMIN_IDS=123456789' in text
+
+
+def test_onboarding_step_one_does_not_save_when_live_validation_fails(
+    isolated_onboarding_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(onboarding_routes, '_test_telegram', lambda token, channel: (False, 'Channel unavailable'))
+    client = TestClient(app)
+    response = client.post(
+        '/onboarding/1',
+        data={
+            'bot_token': '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+            'bot_name': 'Deals Bot',
+            'channel_id': '@deals_channel',
+            'admin_ids': '123456789',
+            'action': 'save',
+        },
+    )
+    assert response.status_code == 200
+    assert 'Channel unavailable' in response.text
+    assert not isolated_onboarding_env.exists()
 
 
 def test_telegram_test_reports_success_without_echoing_secret(

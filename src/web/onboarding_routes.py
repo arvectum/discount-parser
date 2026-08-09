@@ -121,10 +121,10 @@ def onboarding_telegram_save(
         )
     except ValueError as exc:
         return onboarding_telegram(error=str(exc))
+    ok, detail = _test_telegram(bot_token, channel_id)
+    if not ok:
+        return onboarding_telegram(error=detail)
     if action == 'test':
-        ok, detail = _test_telegram(bot_token, channel_id)
-        if not ok:
-            return onboarding_telegram(error=detail)
         save_telegram_setup(bot_token=bot_token, bot_name=bot_name, channel_id=channel_id, admin_ids=admin_ids)
         return onboarding_telegram(checked=detail)
     save_telegram_setup(bot_token=bot_token, bot_name=bot_name, channel_id=channel_id, admin_ids=admin_ids)
