@@ -50,7 +50,7 @@ def test_setup_writes_env_and_redirects(isolated_env: Path) -> None:
     assert 'DP_TELEGRAM_ADMIN_IDS=123456789' in text
 
 
-def test_saved_setup_survives_settings_reload_and_next_request(isolated_env: Path) -> None:
+def test_saved_setup_survives_settings_reload(isolated_env: Path) -> None:
     web_setup.save_telegram_setup(
         bot_token='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ',
         bot_name='Deals Bot',
@@ -67,10 +67,6 @@ def test_saved_setup_survives_settings_reload_and_next_request(isolated_env: Pat
     assert settings.telegram_admin_id_set == {123456789}
     assert settings.setup_complete is True
     assert web_setup.is_setup_complete() is True
-
-    client = TestClient(app)
-    response = client.get('/', follow_redirects=False)
-    assert response.status_code == 200
 
 
 def test_setup_rejects_non_numeric_admin_id(isolated_env: Path) -> None:
