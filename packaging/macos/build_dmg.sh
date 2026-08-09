@@ -63,11 +63,18 @@ cat > "$CONTENTS/Info.plist" <<'EOF'
 </dict></plist>
 EOF
 
+# Ad-hoc signing verifies bundle integrity in CI. A production release can
+# replace this with Developer ID signing + Apple notarization without changing
+# the bundle layout.
+codesign --force --deep --sign - "$BUNDLE"
+codesign --verify --deep --strict "$BUNDLE"
+
 mkdir -p "$STAGE"
 cp -R "$BUNDLE" "$STAGE/Discount Parser.app"
 ln -s /Applications "$STAGE/Applications"
 
 hdiutil create -volname "Discount Parser" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+hdiutil verify "$DMG" >/dev/null
 rm -rf "$STAGE"
 
 echo "DMG BUILD: PASSED"
