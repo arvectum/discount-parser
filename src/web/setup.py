@@ -5,9 +5,7 @@ import tempfile
 from pathlib import Path
 
 from src.shared.config import get_settings
-
-ENV_PATH = Path('.env')
-ENV_EXAMPLE_PATH = Path('.env.example')
+from src.shared.runtime_paths import env_example_path, env_path
 
 REQUIRED_TELEGRAM_KEYS = frozenset(
     {
@@ -18,7 +16,8 @@ REQUIRED_TELEGRAM_KEYS = frozenset(
 )
 
 
-def _read_env(path: Path = ENV_PATH) -> dict[str, str]:
+def _read_env(path: Path | None = None) -> dict[str, str]:
+    path = path or env_path()
     values: dict[str, str] = {}
     if not path.exists():
         return values
@@ -39,10 +38,12 @@ def _single_line(value: str, field_name: str) -> str:
 
 
 def _render_env(replacements: dict[str, str]) -> str:
-    if ENV_PATH.exists():
-        lines = ENV_PATH.read_text(encoding='utf-8').splitlines()
-    elif ENV_EXAMPLE_PATH.exists():
-        lines = ENV_EXAMPLE_PATH.read_text(encoding='utf-8').splitlines()
+    target = env_path()
+    example = env_example_path()
+    if target.exists():
+        lines = target.read_text(encoding='utf-8').splitlines()
+    elif example.exists():
+        lines = example.read_text(encoding='utf-8').splitlines()
     else:
         lines = []
 
@@ -81,13 +82,17 @@ def _atomic_write(path: Path, text: str) -> None:
 
 def _write_env_values(replacements: dict[str, str]) -> None:
     clean = {key: _single_line(str(value), key) for key, value in replacements.items()}
-    _atomic_write(ENV_PATH, _render_env(clean))
+    _atomic_write(env_path(), _render_env(clean))
     get_settings.cache_clear()
 
 
 def is_setup_complete() -> bool:
-    values = _read_env()
-    return all(values.get(key) for key in REQUIRED_TELEGRAM_KEYS)
+    # Use the same Settings loader as the rest of the application so wizard
+    # routing and runtime services always agree about persisted credentials.
+    try:
+        return get_settings().setup_complete
+    except (TypeError, ValueError):
+        return False
 
 
 def validate_telegram_setup(
