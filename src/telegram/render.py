@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from html import escape
+import re
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -21,35 +22,60 @@ def _date(value: datetime | None) -> str | None:
     return value.strftime("%d.%m.%Y") if value else None
 
 
+def _summary(value: str | None, *, limit: int = 420) -> str | None:
+    if not value:
+        return None
+    text = re.sub(r"\s+", " ", value).strip()
+    if not text:
+        return None
+    if len(text) <= limit:
+        return text
+    clipped = text[: limit - 1].rsplit(" ", 1)[0].rstrip(" ,.;:-")
+    return clipped + "…"
+
+
 def render_offer_caption(offer: Offer) -> str:
     lines: list[str] = []
     title = escape(offer.display_title or offer.title)
     lines.append(f"<b>🔥 {title}</b>")
 
+    summary = _summary(offer.description)
+    if summary and summary.casefold() != (offer.display_title or offer.title).strip().casefold():
+        lines.append(f"📝 {escape(summary)}")
+
+    benefit_lines: list[str] = []
     if offer.old_price is not None and offer.new_price is not None:
-        lines.append(f"💰 <s>{escape(_money(offer.old_price, offer.currency) or '')}</s> → <b>{escape(_money(offer.new_price, offer.currency) or '')}</b>")
-    elif offer.discount_percent is not None:
-        lines.append(f"💸 Скидка: <b>{offer.discount_percent:g}%</b>")
+        old_price = escape(_money(offer.old_price, offer.currency) or "")
+        new_price = escape(_money(offer.new_price, offer.currency) or "")
+        benefit_lines.append(f"💰 Цена: <s>{old_price}</s> → <b>{new_price}</b>")
+    if offer.discount_percent is not None:
+        benefit_lines.append(f"💸 Скидка: <b>{offer.discount_percent:g}%</b>")
     elif offer.discount_amount is not None:
-        lines.append(f"💸 Скидка: <b>{escape(_money(offer.discount_amount, offer.currency) or '')}</b>")
-    elif offer.cashback_percent is not None:
-        lines.append(f"💳 Кэшбэк: <b>{offer.cashback_percent:g}%</b>")
+        benefit_lines.append(f"💸 Скидка: <b>{escape(_money(offer.discount_amount, offer.currency) or '')}</b>")
+    if offer.cashback_percent is not None:
+        benefit_lines.append(f"💳 Кэшбэк: <b>{offer.cashback_percent:g}%</b>")
     elif offer.cashback_amount is not None:
-        lines.append(f"💳 Кэшбэк: <b>{escape(_money(offer.cashback_amount, offer.currency) or '')}</b>")
-    elif offer.delivery_price is not None:
-        lines.append(f"🚚 Доставка: <b>{escape(_money(offer.delivery_price, offer.currency) or '')}</b>")
+        benefit_lines.append(f"💳 Кэшбэк: <b>{escape(_money(offer.cashback_amount, offer.currency) or '')}</b>")
+    if offer.delivery_price is not None:
+        benefit_lines.append(f"🚚 Доставка: <b>{escape(_money(offer.delivery_price, offer.currency) or '')}</b>")
+    lines.extend(benefit_lines)
 
     if offer.promo_code:
         lines.append(f"🎁 Промокод: <code>{escape(offer.promo_code)}</code>")
+
+    geo_parts = [value for value in (offer.city, offer.region) if value]
+    if geo_parts:
+        lines.append(f"📍 {escape(', '.join(dict.fromkeys(geo_parts)))}")
+
     if offer.merchant:
-        lines.append(f"🏪 {escape(offer.merchant)}")
+        lines.append(f"🏪 Магазин: {escape(offer.merchant)}")
     if offer.category:
         category = escape(offer.category)
         if offer.subcategory:
             category += f" → {escape(offer.subcategory)}"
         lines.append(f"📂 {category}")
     if offer.valid_until:
-        lines.append(f"⏳ До {_date(offer.valid_until)}")
+        lines.append(f"⏳ Действует до {_date(offer.valid_until)}")
 
     return "\n\n".join(lines)
 
