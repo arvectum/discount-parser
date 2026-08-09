@@ -42,7 +42,7 @@ def test_setup_writes_env_and_redirects(isolated_env: Path) -> None:
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert response.headers['location'] == '/'
+    assert response.headers['location'].startswith('/?message=')
     text = isolated_env.read_text(encoding='utf-8')
     assert 'DP_TELEGRAM_BOT_TOKEN=123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ' in text
     assert 'DP_TELEGRAM_BOT_NAME=Deals Bot' in text
@@ -62,7 +62,7 @@ def test_setup_rejects_non_numeric_admin_id(isolated_env: Path) -> None:
         },
     )
     assert response.status_code == 200
-    assert 'Ошибка' in response.text
+    assert 'Telegram user ID должен быть числом' in response.text
     assert not isolated_env.exists()
 
 
