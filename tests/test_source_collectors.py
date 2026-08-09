@@ -26,12 +26,17 @@ def _source(*, platform: str, url: str, collector_type: str, external_id: str | 
         url=url,
         external_id=external_id,
         collector_type=collector_type,
+        network_policy="auto",
         enabled=True,
         status="unknown",
         trust_level="official",
         priority=50,
         check_interval_minutes=120,
     )
+
+
+def _stub_get(html: str):
+    return lambda url, **kwargs: _response(url, html)
 
 
 def test_generic_web_collector_extracts_semantic_offer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -44,7 +49,7 @@ def test_generic_web_collector_extracts_semantic_offer(monkeypatch: pytest.Monke
       <img src="/img/sale.jpg">
     </section></main></body></html>
     """
-    monkeypatch.setattr(collector, "_get", lambda url: _response(url, html))
+    monkeypatch.setattr(collector, "_get", _stub_get(html))
     items = collector.collect(_source(platform="website", url="https://shop.test/promotions", collector_type="generic_web"))
     assert len(items) == 1
     assert items[0].title == "Летняя распродажа"
@@ -62,7 +67,7 @@ def test_telegram_public_collector_extracts_post(monkeypatch: pytest.MonkeyPatch
       <a class="tgme_widget_message_date" href="https://t.me/shop/42"><time datetime="2026-08-08T10:00:00+00:00"></time></a>
     </div>
     """
-    monkeypatch.setattr(collector, "_get", lambda url: _response(url, html))
+    monkeypatch.setattr(collector, "_get", _stub_get(html))
     items = collector.collect(_source(platform="telegram", url="https://t.me/shop", external_id="shop", collector_type="telegram_public"))
     assert len(items) == 1
     assert items[0].external_id == "shop/42"
@@ -78,7 +83,7 @@ def test_rutube_public_collector_deduplicates_video_links(monkeypatch: pytest.Mo
       <a href="/video/abc/">Акции недели — скидка 40%</a>
     </body></html>
     """
-    monkeypatch.setattr(collector, "_get", lambda url: _response(url, html))
+    monkeypatch.setattr(collector, "_get", _stub_get(html))
     items = collector.collect(_source(platform="rutube", url="https://rutube.ru/channel/1/", collector_type="rutube_public"))
     assert len(items) == 1
     assert items[0].external_id == "abc"
@@ -88,7 +93,7 @@ def test_rutube_public_collector_deduplicates_video_links(monkeypatch: pytest.Mo
 def test_dzen_collector_uses_public_page_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     collector = DzenPublicCollector()
     html = "<html><body><article><h2>Акция магазина</h2><p>Скидка 15% по выходным</p></article></body></html>"
-    monkeypatch.setattr(collector, "_get", lambda url: _response(url, html))
+    monkeypatch.setattr(collector, "_get", _stub_get(html))
     items = collector.collect(_source(platform="dzen", url="https://dzen.ru/shop", collector_type="dzen_public"))
     assert len(items) == 1
     assert items[0].title == "Акция магазина"
