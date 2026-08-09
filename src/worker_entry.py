@@ -15,6 +15,16 @@ from src.shared.db import session_scope
 from src.telegram.runner import run_bot
 
 
+def _configure_console_encoding() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, 'reconfigure', None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding='utf-8', errors='replace')
+            except (AttributeError, ValueError):
+                pass
+
+
 def _prepare_runtime_directory() -> Path:
     if getattr(sys, 'frozen', False):
         root = Path(sys.executable).resolve().parent
@@ -40,6 +50,7 @@ def doctor() -> int:
 
 
 def main() -> int:
+    _configure_console_encoding()
     _prepare_runtime_directory()
     command_name = sys.argv[1] if len(sys.argv) > 1 else ''
     if command_name == 'bot':
