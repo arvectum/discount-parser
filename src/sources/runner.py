@@ -65,6 +65,19 @@ def _has_benefit(normalized: NormalizedOffer) -> bool:
     ) or bool(normalized.promo_code) or "бесплат" in normalized.title.lower()
 
 
+def _raw_matches_geo(raw: RawOffer, *, city: str | None = None, region: str | None = None) -> bool:
+    target_city = (city or "").strip().casefold()
+    target_region = (region or "").strip().casefold()
+    if not target_city and not target_region:
+        return True
+    geo = extract_geo(raw.title, raw.description, city=raw.city, region=raw.region)
+    if target_city and (geo.city or "").casefold() != target_city:
+        return False
+    if target_region and (geo.region or "").casefold() != target_region:
+        return False
+    return True
+
+
 def _normalized_values(raw: RawOffer, normalized: NormalizedOffer, now: datetime) -> dict[str, object]:
     geo = extract_geo(raw.title, raw.description, city=raw.city, region=raw.region)
     return _non_empty(
@@ -194,12 +207,13 @@ def _record_failed_collection(config: SourceConfig, error: Exception) -> RunResu
     return RunResult(source_key=config.key, errors=1, error=message)
 
 
-def run_source(config: SourceConfig) -> RunResult:
+def run_source(config: SourceConfig, *, city: str | None = None, region: str | None = None) -> RunResult:
     try:
-        raw_offers = build_adapter(config).collect()
+        collected = build_adapter(config).collect()
     except Exception as exc:
         return _record_failed_collection(config, exc)
 
+    raw_offers = [raw for raw in collected if _raw_matches_geo(raw, city=city, region=region)]
     result = RunResult(source_key=config.key, fetched=len(raw_offers))
     with session_scope() as session:
         source = _ensure_source(session, config)
@@ -243,12 +257,18 @@ def run_source(config: SourceConfig) -> RunResult:
     return result
 
 
-def run_all(path: str = "config/sources.yaml", only: str | None = None) -> list[RunResult]:
+def run_all(
+    path: str = "config/sources.yaml",
+    only: str | None = None,
+    *,
+    city: str | None = None,
+    region: str | None = None,
+) -> list[RunResult]:
     results: list[RunResult] = []
     for config in load_source_configs(path):
         if not _source_is_enabled(config):
             continue
         if only and config.key != only:
             continue
-        results.append(run_source(config))
+        results.append(run_source(config, city=city, region=region))
     return results
