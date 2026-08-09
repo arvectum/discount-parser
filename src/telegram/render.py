@@ -8,6 +8,7 @@ import re
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.modules.offers.models import Offer
+from src.telegram.publication_format import PublicationFormat, load_publication_format
 
 
 MAX_TITLE_CHARS = 110
@@ -82,54 +83,55 @@ def _geo_label(offer: Offer) -> str:
     return "Не указано"
 
 
-def render_offer_caption(offer: Offer) -> str:
-    """Render a compact, source-independent Telegram publication.
-
-    Raw source description is deliberately excluded from the publication. It
-    stays available for review/extraction, while Telegram always gets the same
-    concise structured fields regardless of source verbosity.
-    """
-    lines: list[str] = [f"<b>🔥 {escape(_headline(offer))}</b>", ""]
-
-    merchant = _clip(offer.merchant, limit=MAX_MERCHANT_CHARS)
-    if merchant:
-        lines.append(f"🏪 Поставщик: {escape(merchant)}")
-
-    if offer.old_price is not None and offer.new_price is not None:
+def _field_line(key: str, offer: Offer) -> str | None:
+    if key == "merchant":
+        merchant = _clip(offer.merchant, limit=MAX_MERCHANT_CHARS)
+        return f"🏪 Поставщик: {escape(merchant)}" if merchant else None
+    if key == "price" and offer.old_price is not None and offer.new_price is not None:
         old_price = escape(_money(offer.old_price, offer.currency) or "")
         new_price = escape(_money(offer.new_price, offer.currency) or "")
-        lines.append(f"💰 Цена: <s>{old_price}</s> → <b>{new_price}</b>")
-
-    discount = _discount_label(offer)
-    if discount:
-        lines.append(f"💸 Скидка: <b>{escape(discount)}</b>")
-
-    cashback = _cashback_label(offer)
-    if cashback:
-        lines.append(f"💳 Кэшбэк: <b>{escape(cashback)}</b>")
-
-    if offer.delivery_price is not None:
-        lines.append(f"🚚 Доставка: <b>{escape(_money(offer.delivery_price, offer.currency) or '')}</b>")
-
-    if offer.category:
+        return f"💰 Цена: <s>{old_price}</s> → <b>{new_price}</b>"
+    if key == "discount":
+        discount = _discount_label(offer)
+        return f"💸 Скидка: <b>{escape(discount)}</b>" if discount else None
+    if key == "cashback":
+        cashback = _cashback_label(offer)
+        return f"💳 Кэшбэк: <b>{escape(cashback)}</b>" if cashback else None
+    if key == "delivery" and offer.delivery_price is not None:
+        return f"🚚 Доставка: <b>{escape(_money(offer.delivery_price, offer.currency) or '')}</b>"
+    if key == "category" and offer.category:
         category = _clip(offer.category, limit=MAX_CATEGORY_CHARS) or ""
         if offer.subcategory:
             subcategory = _clip(offer.subcategory, limit=MAX_CATEGORY_CHARS) or ""
             category = _clip(f"{category} → {subcategory}", limit=MAX_CATEGORY_CHARS) or category
-        lines.append(f"📂 Категория: {escape(category)}")
+        return f"📂 Категория: {escape(category)}"
+    if key == "conditions":
+        condition_text = _conditions(offer)
+        return f"📌 Условия: {escape(condition_text)}" if condition_text else None
+    if key == "geo":
+        return f"📍 ГЕО: {escape(_geo_label(offer))}"
+    if key == "valid_until" and offer.valid_until:
+        return f"⏳ До: {_date(offer.valid_until)}"
+    if key == "promo_code" and offer.promo_code:
+        return f"🎁 Промокод: <code>{escape(_clip(offer.promo_code, limit=64) or '')}</code>"
+    return None
 
-    condition_text = _conditions(offer)
-    if condition_text:
-        lines.append(f"📌 Условия: {escape(condition_text)}")
 
-    lines.append(f"📍 ГЕО: {escape(_geo_label(offer))}")
+def render_offer_caption(offer: Offer, publication_format: PublicationFormat | None = None) -> str:
+    """Render a compact source-independent Telegram publication.
 
-    if offer.valid_until:
-        lines.append(f"⏳ До: {_date(offer.valid_until)}")
-
-    if offer.promo_code:
-        lines.append(f"🎁 Промокод: <code>{escape(_clip(offer.promo_code, limit=64) or '')}</code>")
-
+    Raw source description is deliberately excluded. The visible field set and
+    its order come from customer-owned publication format settings; passing an
+    explicit PublicationFormat is useful for previews and deterministic tests.
+    """
+    current_format = (publication_format or load_publication_format()).normalized()
+    lines: list[str] = [f"<b>🔥 {escape(_headline(offer))}</b>", ""]
+    for key in current_format.order:
+        if key not in current_format.enabled:
+            continue
+        line = _field_line(key, offer)
+        if line:
+            lines.append(line)
     return "\n".join(lines)
 
 
