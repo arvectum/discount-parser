@@ -1,34 +1,12 @@
 from __future__ import annotations
 
-from urllib.parse import quote, urlsplit, urlunsplit
-
 from aiogram import Bot
 from aiogram.client.session.aiohttp import AiohttpSession
 
 from src.shared.config import get_settings
-from src.shared.network import NetworkRouteError, network_router
+from src.shared.network import NetworkRouteError, configured_proxy_url, network_router
 
 TELEGRAM_API_ROOT = "https://api.telegram.org"
-
-
-def _proxy_url_with_credentials() -> str | None:
-    settings = get_settings()
-    raw = (settings.proxy_url or "").strip()
-    if not raw:
-        return None
-    if not settings.proxy_username:
-        return raw
-    parts = urlsplit(raw)
-    if not parts.scheme or not parts.hostname:
-        return raw
-    username = quote(settings.proxy_username, safe="")
-    password = quote(settings.proxy_password or "", safe="")
-    auth = username + (f":{password}" if settings.proxy_password is not None else "")
-    host = parts.hostname
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    port = f":{parts.port}" if parts.port else ""
-    return urlunsplit((parts.scheme, f"{auth}@{host}{port}", parts.path, parts.query, parts.fragment))
 
 
 def resolve_telegram_route() -> str:
@@ -37,7 +15,7 @@ def resolve_telegram_route() -> str:
     if requested in {"direct", "system"}:
         return requested
     if requested == "proxy":
-        if not _proxy_url_with_credentials():
+        if not configured_proxy_url():
             raise NetworkRouteError("Telegram proxy route selected but proxy URL is empty")
         return "proxy"
     return network_router.choose_route(TELEGRAM_API_ROOT)
@@ -46,8 +24,8 @@ def resolve_telegram_route() -> str:
 def build_bot(token: str) -> Bot:
     route = resolve_telegram_route()
     if route == "proxy":
-        session = AiohttpSession(proxy=_proxy_url_with_credentials())
+        session = AiohttpSession(proxy=configured_proxy_url())
         return Bot(token=token, session=session)
     # aiohttp ignores HTTP(S)_PROXY environment variables by default. That is
-    # intentional for the direct route; a TUN VPN still applies at OS level.
+    # intentional for direct; a TUN VPN still applies at OS routing level.
     return Bot(token=token)
