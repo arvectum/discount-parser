@@ -7,12 +7,12 @@ from datetime import UTC, datetime
 from typing import Protocol
 from urllib.parse import urljoin, urlparse
 
-import httpx
 from bs4 import BeautifulSoup
 
 from src.modules.source_registry.models import RegisteredSource
 from src.modules.source_registry.service import ItemPayload
 from src.shared.config import get_settings
+from src.shared.network import network_router
 
 
 class CollectorError(RuntimeError):
@@ -38,16 +38,18 @@ class HttpPolicy:
 class HttpCollectorBase:
     policy = HttpPolicy()
 
-    def _get(self, url: str) -> httpx.Response:
+    def _get(self, url: str, *, route: str = "auto", retry_statuses: set[int] | None = None):
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise CollectorError("collector URL must be an absolute http(s) URL")
-        with httpx.Client(
+        response = network_router.get(
+            url,
+            route=route,
+            retry_statuses=retry_statuses,
             follow_redirects=True,
             timeout=self.policy.timeout_seconds,
             headers={"User-Agent": self.policy.user_agent, "Accept-Language": "ru,en;q=0.8"},
-        ) as client:
-            response = client.get(url)
+        )
         response.raise_for_status()
         if len(response.content) > self.policy.max_response_bytes:
             raise CollectorError(f"response too large: {len(response.content)} bytes")
@@ -55,14 +57,10 @@ class HttpCollectorBase:
 
 
 class GenericWebCollector(HttpCollectorBase):
-    """Conservative collector for a known merchant/promotion page.
-
-    It does not crawl the internet. It extracts bounded semantic blocks from the
-    single registered URL. Same-domain promotion discovery is handled separately.
-    """
+    """Conservative collector for a known merchant/promotion page."""
 
     def collect(self, source: RegisteredSource) -> list[ItemPayload]:
-        response = self._get(source.url)
+        response = self._get(source.url, route=source.network_policy)
         soup = BeautifulSoup(response.text, "html.parser")
         for tag in soup(["script", "style", "noscript", "svg"]):
             tag.decompose()
@@ -88,16 +86,7 @@ class GenericWebCollector(HttpCollectorBase):
             title = " ".join(heading.stripped_strings)[:1000] if heading else None
             image = element.find("img", src=True)
             image_url = urljoin(str(response.url), image["src"]) if image else None
-            result.append(
-                ItemPayload(
-                    external_id=digest,
-                    url=item_url,
-                    title=title,
-                    text=text,
-                    image_url=image_url,
-                    raw_payload={"collector": "generic_web"},
-                )
-            )
+            result.append(ItemPayload(external_id=digest, url=item_url, title=title, text=text, image_url=image_url, raw_payload={"collector": "generic_web", "network_policy": source.network_policy}))
             if len(result) >= self.policy.max_items:
                 break
         return result
@@ -108,21 +97,11 @@ class PublicPageCollector(GenericWebCollector):
 
 
 class DzenPublicCollector(PublicPageCollector):
-    """Known Dzen channel/publication page collector.
-
-    Dzen's public web surface is intentionally treated as a compatibility
-    collector. Live acceptance may replace internals with a stable public JSON or
-    RSS surface without changing the persisted collector contract.
-    """
+    """Compatibility collector for a known Dzen page."""
 
 
 class TelegramPublicCollector(HttpCollectorBase):
-    """Collect public preview posts from a known t.me channel without user auth.
-
-    This is intentionally a public-preview collector, not an MTProto replacement.
-    Private channels and channels unavailable through /s require a separate
-    authenticated collector.
-    """
+    """Collect public preview posts from a known t.me channel without user auth."""
 
     def collect(self, source: RegisteredSource) -> list[ItemPayload]:
         parsed = urlparse(source.url)
@@ -135,7 +114,10 @@ class TelegramPublicCollector(HttpCollectorBase):
         if not channel:
             raise CollectorError("Telegram source requires channel username/external_id")
         url = f"https://t.me/s/{channel.lstrip('@')}"
-        response = self._get(url)
+        # Telegram public pages may be blocked by geography/network policy. In
+        # auto mode, 403/451 are useful signals to try the next available route.
+        retry = {403, 451} if source.network_policy == "auto" else set()
+        response = self._get(url, route=source.network_policy, retry_statuses=retry)
         soup = BeautifulSoup(response.text, "html.parser")
         result: list[ItemPayload] = []
         for wrapper in soup.select(".tgme_widget_message_wrap"):
@@ -163,18 +145,7 @@ class TelegramPublicCollector(HttpCollectorBase):
                 match = re.search(r"background-image:url\(['\"]?([^'\")]+)", style)
                 if match:
                     image_url = match.group(1)
-            result.append(
-                ItemPayload(
-                    external_id=post_id,
-                    url=item_url,
-                    title=None,
-                    text=text[:12000],
-                    published_at=published_at,
-                    author=channel,
-                    image_url=image_url,
-                    raw_payload={"collector": "telegram_public"},
-                )
-            )
+            result.append(ItemPayload(external_id=post_id, url=item_url, title=None, text=text[:12000], published_at=published_at, author=channel, image_url=image_url, raw_payload={"collector": "telegram_public", "network_policy": source.network_policy}))
             if len(result) >= self.policy.max_items:
                 break
         return result
@@ -191,17 +162,12 @@ class VkApiCollector(HttpCollectorBase):
         owner_id = source.external_id
         if not owner_id:
             raise CollectorError("VK source requires external_id (owner_id/domain)")
-        params = {
-            "access_token": token,
-            "v": settings.vk_api_version,
-            "count": min(self.policy.max_items, 100),
-        }
+        params = {"access_token": token, "v": settings.vk_api_version, "count": min(self.policy.max_items, 100)}
         if owner_id.lstrip("-").isdigit():
             params["owner_id"] = owner_id
         else:
             params["domain"] = owner_id.lstrip("@")
-        with httpx.Client(timeout=self.policy.timeout_seconds) as client:
-            response = client.get(self.API_URL, params=params)
+        response = network_router.get(self.API_URL, route=source.network_policy, timeout=self.policy.timeout_seconds, params=params)
         response.raise_for_status()
         payload = response.json()
         if "error" in payload:
@@ -214,29 +180,15 @@ class VkApiCollector(HttpCollectorBase):
             post_id = str(item.get("id"))
             owner = str(item.get("owner_id", owner_id))
             published_at = datetime.fromtimestamp(item["date"], UTC) if item.get("date") else None
-            result.append(
-                ItemPayload(
-                    external_id=post_id,
-                    url=f"https://vk.com/wall{owner}_{post_id}",
-                    title=None,
-                    text=text[:12000],
-                    published_at=published_at,
-                    author=owner,
-                    raw_payload={"collector": "vk_api", "post": item},
-                )
-            )
+            result.append(ItemPayload(external_id=post_id, url=f"https://vk.com/wall{owner}_{post_id}", title=None, text=text[:12000], published_at=published_at, author=owner, raw_payload={"collector": "vk_api", "post": item, "network_policy": source.network_policy}))
         return result
 
 
 class RutubePublicCollector(HttpCollectorBase):
-    """Collect public Rutube channel/video metadata from the registered page.
-
-    Rutube's public page remains the compatibility fallback; live acceptance may
-    replace this with a documented JSON endpoint when one is confirmed stable.
-    """
+    """Collect public Rutube channel/video metadata from the registered page."""
 
     def collect(self, source: RegisteredSource) -> list[ItemPayload]:
-        response = self._get(source.url)
+        response = self._get(source.url, route=source.network_policy)
         soup = BeautifulSoup(response.text, "html.parser")
         result: list[ItemPayload] = []
         seen: set[str] = set()
@@ -252,16 +204,7 @@ class RutubePublicCollector(HttpCollectorBase):
             if not title:
                 continue
             external_id = url.rstrip("/").split("/")[-1]
-            result.append(
-                ItemPayload(
-                    external_id=external_id,
-                    url=url,
-                    title=title[:1000],
-                    text=title[:12000],
-                    author=source.name,
-                    raw_payload={"collector": "rutube_public"},
-                )
-            )
+            result.append(ItemPayload(external_id=external_id, url=url, title=title[:1000], text=title[:12000], author=source.name, raw_payload={"collector": "rutube_public", "network_policy": source.network_policy}))
             if len(result) >= self.policy.max_items:
                 break
         return result
