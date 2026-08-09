@@ -20,9 +20,8 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         'DP_STALE_AFTER_DAYS=7\n',
         encoding='utf-8',
     )
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(web_setup, 'ENV_PATH', env_path)
-    monkeypatch.setattr(web_setup, 'ENV_EXAMPLE_PATH', example_path)
+    monkeypatch.setenv('DP_RUNTIME_ROOT', str(tmp_path))
+    monkeypatch.delenv('DP_ENV_FILE', raising=False)
     get_settings.cache_clear()
     yield env_path
     get_settings.cache_clear()
