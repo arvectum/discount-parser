@@ -17,6 +17,8 @@ class PublishCriteria:
     offer_type: str | None = None
     merchant: str | None = None
     source_key: str | None = None
+    city: str | None = None
+    region: str | None = None
     limit: int = 20
 
     @classmethod
@@ -28,6 +30,8 @@ class PublishCriteria:
             offer_type=row.offer_type,
             merchant=row.merchant,
             source_key=row.source_key,
+            city=row.city,
+            region=row.region,
             limit=row.max_posts_per_cycle,
         )
 
@@ -57,6 +61,10 @@ def list_publish_candidates(
         query = query.where(Offer.offer_type == criteria.offer_type)
     if criteria.merchant:
         query = query.where(Offer.merchant == criteria.merchant)
+    if criteria.city:
+        query = query.where(Offer.city == criteria.city)
+    if criteria.region:
+        query = query.where(Offer.region == criteria.region)
     if criteria.source_key:
         query = (
             query.join(OfferSourceObservation, OfferSourceObservation.offer_id == Offer.id)
