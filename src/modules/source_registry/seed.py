@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from src.modules.source_registry.models import RegisteredSource
@@ -14,7 +14,17 @@ def seed_registry(session: Session, *, sources_config_path: str) -> dict[str, in
     sources_updated = 0
 
     for config in load_source_configs(sources_config_path):
-        row = session.scalar(select(RegisteredSource).where(RegisteredSource.key == config.key))
+        # ``create_source`` normalizes keys to URL-safe slugs. Match the
+        # legacy external ID as well, otherwise keys containing underscores
+        # are inserted again on every seed run.
+        row = session.scalar(
+            select(RegisteredSource).where(
+                or_(
+                    RegisteredSource.key == config.key,
+                    RegisteredSource.external_id == config.key,
+                )
+            )
+        )
         if row is None:
             create_source(
                 session,

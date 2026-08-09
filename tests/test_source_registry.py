@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+from src.cli import main as cli_main
 from src.modules.source_registry.collectors import COLLECTORS, build_collector
 from src.modules.source_registry.models import RegisteredSource, SourceCandidate, SourceItem, SourceKeyword
 from src.modules.source_registry.seed import seed_registry
@@ -27,10 +28,10 @@ def registry_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config = tmp_path / "sources.yaml"
     config.write_text(
         "sources:\n"
-        "  - key: promokood\n"
-        "    name: Promokood\n"
-        "    adapter: promokood\n"
-        "    base_url: https://promokood.ru/\n"
+        "  - key: promokodi_net_ru\n"
+        "    name: Promokodi.net.ru\n"
+        "    adapter: promokodi_net_ru\n"
+        "    base_url: https://promokodi.net.ru/\n"
         "    enabled: true\n",
         encoding="utf-8",
     )
@@ -60,6 +61,15 @@ def test_registry_seed_is_idempotent(registry_db: Path) -> None:
     assert len(sources) == 1
     assert sources[0].collector_type == "legacy_adapter"
     assert keywords
+
+
+def test_registry_seed_cli_uses_configured_path_and_is_idempotent(registry_db: Path) -> None:
+    assert cli_main(["registry-seed"]) == 0
+    assert cli_main(["registry-seed"]) == 0
+
+    with create_session() as session:
+        sources = session.scalars(select(RegisteredSource)).all()
+    assert len(sources) == 1
 
 
 def test_source_item_upsert_uses_external_id(registry_db: Path) -> None:

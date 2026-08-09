@@ -32,8 +32,12 @@ chmod +x delivery/install.command delivery/app/DiscountParser
 
 (
   cd delivery/app
+  qa_dir="$(mktemp -d)"
+  trap 'rm -rf "$qa_dir"' EXIT
+  export DP_DATABASE_URL="sqlite:///$qa_dir/frozen-smoke.db"
   ./DiscountParser migrate
-  ./DiscountParser doctor
+  # Avoid coupling frozen validation to an unrelated app on the default UI port.
+  DP_WEB_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')" ./DiscountParser doctor
 )
 
 echo "LOCAL MACOS DELIVERY BUILD: PASSED"
