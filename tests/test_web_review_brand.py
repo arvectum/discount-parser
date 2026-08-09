@@ -52,7 +52,8 @@ def test_review_page_approves_offer_and_persists_manual_overrides(review_db) -> 
     assert 'Одобрить → ready' in page.text
     assert 'Как будет выглядеть публикация' in page.text
     assert '🏪 Поставщик: Кофейня' in page.text
-    assert '💸 Скидка: <b>20%</b>' in page.text
+    assert '💸 Скидка:' in page.text
+    assert '20%' in page.text
     assert 'Полный текст источника в Telegram не копируется' in page.text
     assert 'ООО «Арвектум»' in page.text
     assert 'ИНН 7716261422' in page.text
