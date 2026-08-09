@@ -5,6 +5,8 @@ from decimal import Decimal
 from src.core.geo import extract_geo
 from src.modules.offers.models import Offer, PublishFilter
 from src.modules.publishing.service import PublishCriteria
+from src.sources.base import RawOffer
+from src.sources.runner import _raw_matches_geo
 from src.telegram.render import render_offer_caption
 
 
@@ -31,6 +33,25 @@ def test_extract_geo_does_not_invent_location() -> None:
     result = extract_geo("Скидка 25% на бытовую технику", "Доставка по России")
     assert result.city is None
     assert result.region is None
+
+
+def test_manual_parse_geo_scope_matches_only_requested_location() -> None:
+    moscow = RawOffer(
+        source_key="test",
+        external_id="1",
+        title="Скидка в Москве",
+        source_url="https://example.test/1",
+    )
+    federal = RawOffer(
+        source_key="test",
+        external_id="2",
+        title="Скидка по всей России",
+        source_url="https://example.test/2",
+    )
+    assert _raw_matches_geo(moscow, city="Москва") is True
+    assert _raw_matches_geo(moscow, city="Казань") is False
+    assert _raw_matches_geo(federal, city="Москва") is False
+    assert _raw_matches_geo(federal) is True
 
 
 def test_publish_criteria_carries_geo_filter() -> None:
