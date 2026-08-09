@@ -28,7 +28,7 @@ cp -R migrations delivery/app/migrations
 cp alembic.ini delivery/app/alembic.ini
 cp .env.example delivery/app/.env.example
 cp packaging/macos/install.command delivery/install.command
-chmod +x delivery/install.command delivery/app/DiscountParser
+chmod +x delivery/install.command delivery/app/DiscountParser packaging/macos/build_dmg.sh
 
 (
   cd delivery/app
@@ -36,5 +36,8 @@ chmod +x delivery/install.command delivery/app/DiscountParser
   ./DiscountParser doctor
 )
 
+bash packaging/macos/build_dmg.sh
+
 echo "LOCAL MACOS DELIVERY BUILD: PASSED"
 echo "Package directory: delivery/"
+echo "DMG: delivery/DiscountParser.dmg"
