@@ -32,6 +32,18 @@ chmod +x delivery/install.command delivery/app/DiscountParser
 
 (
   cd delivery/app
+  QA_DIR="$(mktemp -d)"
+  trap 'rm -rf "$QA_DIR"' EXIT
+  QA_PORT="$(python3 - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+)"
+  export DP_DATABASE_URL="sqlite:///$QA_DIR/frozen-smoke.db"
+  export DP_WEB_PORT="$QA_PORT"
   ./DiscountParser migrate
   ./DiscountParser doctor
 )
