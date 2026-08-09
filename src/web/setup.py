@@ -124,6 +124,45 @@ def save_telegram_setup(
     )
 
 
+def save_telegram_collector_setup(
+    *,
+    mode: str,
+    api_id: str = '',
+    api_hash: str = '',
+    session: str = '',
+) -> None:
+    mode = _single_line(mode, 'Режим Telegram collector').lower() or 'public'
+    if mode not in {'public', 'mtproto'}:
+        raise ValueError('Неизвестный режим Telegram collector.')
+    api_id = _single_line(api_id, 'Telegram API ID')
+    api_hash = _single_line(api_hash, 'Telegram API Hash')
+    session = _single_line(session, 'Telegram session')
+    if mode == 'mtproto':
+        if not api_id or not api_id.isdigit():
+            raise ValueError('Для MTProto укажите числовой Telegram API ID.')
+        if len(api_hash) < 16:
+            raise ValueError('Для MTProto укажите Telegram API Hash.')
+    _write_env_values(
+        {
+            'DP_TELEGRAM_COLLECTOR_MODE': mode,
+            'DP_TELEGRAM_COLLECTOR_API_ID': api_id,
+            'DP_TELEGRAM_COLLECTOR_API_HASH': api_hash,
+            'DP_TELEGRAM_COLLECTOR_SESSION': session,
+        }
+    )
+
+
+def save_vk_setup(*, access_token: str = '', api_version: str = '5.199') -> None:
+    access_token = _single_line(access_token, 'VK access token')
+    api_version = _single_line(api_version, 'VK API version') or '5.199'
+    _write_env_values(
+        {
+            'DP_VK_ACCESS_TOKEN': access_token,
+            'DP_VK_API_VERSION': api_version,
+        }
+    )
+
+
 def save_operational_settings(
     *,
     collect_interval_minutes: int,
