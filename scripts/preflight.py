@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,13 @@ def run(label: str, args: list[str], *, env: dict[str, str] | None = None) -> No
         raise SystemExit(f"{label} failed with exit code {completed.returncode}")
 
 
+def free_local_port() -> int:
+    """Return a loopback port for an isolated Doctor check."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
 def main() -> int:
     python = sys.executable
 
@@ -26,6 +34,7 @@ def main() -> int:
         db_path = Path(tmp) / "preflight.db"
         env = os.environ.copy()
         env["DP_DATABASE_URL"] = f"sqlite:///{db_path}"
+        env["DP_WEB_PORT"] = str(free_local_port())
         run("migration", [python, "-m", "alembic", "upgrade", "head"], env=env)
         run("doctor", [python, "-m", "src.cli", "doctor"], env=env)
 

@@ -222,6 +222,12 @@ def dashboard(message: str | None = None):
     return HTMLResponse(_layout('Discount Parser', body))
 
 
+@app.get('/health')
+def health() -> dict[str, str]:
+    """Expose a loopback health check before onboarding completes."""
+    return {'status': 'ok'}
+
+
 @app.get('/setup', response_class=HTMLResponse)
 def setup_page(error: str | None = None):
     settings = get_settings()

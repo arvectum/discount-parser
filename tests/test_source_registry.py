@@ -8,6 +8,7 @@ from sqlalchemy import select
 from src.modules.source_registry.collectors import COLLECTORS, build_collector
 from src.modules.source_registry.models import RegisteredSource, SourceCandidate, SourceItem, SourceKeyword
 from src.modules.source_registry.seed import TELEGRAM_TEST_SOURCES, seed_registry
+from src.cli import main as cli_main
 from src.modules.source_registry.service import (
     ItemPayload,
     add_keyword,
@@ -63,6 +64,10 @@ def test_registry_seed_is_idempotent(registry_db: Path) -> None:
     assert all(row.collector_type == "telegram_public" for row in telegram)
     assert all(row.network_policy == "auto" for row in telegram)
     assert keywords
+
+
+def test_registry_seed_cli_uses_current_seed_signature(registry_db: Path) -> None:
+    assert cli_main(["registry-seed"]) == 0
 
 
 def test_source_item_upsert_uses_external_id(registry_db: Path) -> None:
