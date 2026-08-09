@@ -9,16 +9,19 @@ from starlette.responses import PlainTextResponse, RedirectResponse, Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from src.web.app import app
+from src.web.brand import BRAND_STYLE, brand_footer, brand_header
 from src.web.management_pages import router as management_router
 from src.web.network_routes import router as network_router
 from src.web.onboarding_routes import router as onboarding_router
 from src.web.processes import process_manager
+from src.web.review_routes import router as review_router
 from src.web.setup import is_setup_complete
 from src.web.source_registry_static_routes import router as source_registry_static_router
 from src.web.source_registry_routes import router as source_registry_router
 from src.web.system_routes import router as system_router
 
 app.include_router(management_router)
+app.include_router(review_router)
 app.include_router(source_registry_static_router)
 app.include_router(source_registry_router)
 app.include_router(system_router)
@@ -64,24 +67,24 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
                 except Exception:
                     pass
 
-        if request.url.path != '/' or response.headers.get('content-type', '').split(';')[0] != 'text/html':
+        if response.headers.get('content-type', '').split(';')[0] != 'text/html':
             return response
 
         body = b''
         async for chunk in response.body_iterator:
             body += chunk
         text = body.decode('utf-8')
-        if '<div class="wrap">' in text and 'href="/offers"' not in text:
-            nav = '''<div class="row" style="margin:0 0 18px">
-              <a class="btn secondary" href="/">Главная</a>
-              <a class="btn secondary" href="/sources-registry">Источники</a>
-              <a class="btn secondary" href="/offers">Предложения</a>
-              <a class="btn secondary" href="/runs">Журнал</a>
-              <a class="btn secondary" href="/system">Система</a>
-              <a class="btn secondary" href="/network">Сеть</a>
-              <a class="btn secondary" href="/onboarding/1">Интеграции</a>
-            </div>'''
-            text = text.replace('<div class="wrap">', '<div class="wrap">' + nav, 1)
+        if 'id="arvectum-brand-style"' not in text:
+            if '</head>' in text:
+                text = text.replace('</head>', BRAND_STYLE + '</head>', 1)
+            else:
+                text = BRAND_STYLE + text
+        if '<body' in text and 'class="arv-header"' not in text:
+            body_end = text.find('>', text.find('<body'))
+            if body_end >= 0:
+                text = text[:body_end + 1] + brand_header(request.url.path) + text[body_end + 1:]
+        if '</body>' in text and 'class="arv-footer"' not in text:
+            text = text.replace('</body>', brand_footer() + '</body>', 1)
         headers = dict(response.headers)
         headers.pop('content-length', None)
         return Response(content=text, status_code=response.status_code, headers=headers, media_type='text/html')
