@@ -12,6 +12,9 @@ from src.shared.db import create_session
 from src.telegram.render import offer_keyboard, render_offer_caption
 
 
+PUBLICATION_TEMPLATE_VERSION = "v2"
+
+
 @dataclass(frozen=True, slots=True)
 class PublishResult:
     offer_id: int
@@ -46,7 +49,12 @@ def _reserve_publication(offer_id: int, channel_id: str) -> tuple[Offer | None, 
         # "pending" is the durable reservation state defined by the schema.
         # Creating the row before the Telegram network call preserves the
         # conservative at-most-once publication guarantee.
-        publication = Publication(offer_id=offer_id, channel_id=channel_id, status="pending")
+        publication = Publication(
+            offer_id=offer_id,
+            channel_id=channel_id,
+            status="pending",
+            template_version=PUBLICATION_TEMPLATE_VERSION,
+        )
         session.add(publication)
         try:
             session.commit()
