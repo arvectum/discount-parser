@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 
 from src.core.classification import classify_offer
 from src.core.dedup import find_existing_offer
+from src.core.geo import extract_geo
 from src.core.normalization import NormalizedOffer, normalize_raw_offer
 from src.modules.offers.models import Offer, OfferSourceObservation, ParseRun, Source
 from src.modules.offers.repository import OfferRepository
@@ -65,12 +66,15 @@ def _has_benefit(normalized: NormalizedOffer) -> bool:
 
 
 def _normalized_values(raw: RawOffer, normalized: NormalizedOffer, now: datetime) -> dict[str, object]:
+    geo = extract_geo(raw.title, raw.description, city=raw.city, region=raw.region)
     return _non_empty(
         {
             "title": normalized.title,
             "description": raw.description,
             "merchant": normalized.merchant,
             "brand": normalized.brand,
+            "city": geo.city,
+            "region": geo.region,
             "promo_code": normalized.promo_code,
             "discount_percent": normalized.discount_percent,
             "discount_amount": normalized.discount_amount,
