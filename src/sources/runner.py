@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 
 from src.core.classification import classify_offer
+from src.core.conditions import extract_conditions
 from src.core.dedup import find_existing_offer
 from src.core.geo import extract_geo
 from src.core.normalization import NormalizedOffer, normalize_raw_offer
@@ -70,7 +71,7 @@ def _raw_matches_geo(raw: RawOffer, *, city: str | None = None, region: str | No
     target_region = (region or "").strip().casefold()
     if not target_city and not target_region:
         return True
-    geo = extract_geo(raw.title, raw.description, city=raw.city, region=raw.region)
+    geo = extract_geo(raw.title, raw.description, city=raw.city, region=raw.region, scope=raw.geo_scope)
     if target_city and (geo.city or "").casefold() != target_city:
         return False
     if target_region and (geo.region or "").casefold() != target_region:
@@ -79,15 +80,20 @@ def _raw_matches_geo(raw: RawOffer, *, city: str | None = None, region: str | No
 
 
 def _normalized_values(raw: RawOffer, normalized: NormalizedOffer, now: datetime) -> dict[str, object]:
-    geo = extract_geo(raw.title, raw.description, city=raw.city, region=raw.region)
+    geo = extract_geo(raw.title, raw.description, city=raw.city, region=raw.region, scope=raw.geo_scope)
+    condition = extract_conditions(raw.title, raw.description, explicit=raw.conditions)
     return _non_empty(
         {
             "title": normalized.title,
             "description": raw.description,
             "merchant": normalized.merchant,
             "brand": normalized.brand,
+            "geo_scope": geo.scope,
             "city": geo.city,
             "region": geo.region,
+            "conditions": condition.conditions,
+            "max_discount_amount": raw.max_discount_amount or condition.max_discount_amount,
+            "min_order_amount": raw.min_order_amount or condition.min_order_amount,
             "promo_code": normalized.promo_code,
             "discount_percent": normalized.discount_percent,
             "discount_amount": normalized.discount_amount,
@@ -154,12 +160,7 @@ def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
         offer = match.offer
         _update_offer(session, offer, raw, normalized, now)
     else:
-        classification = classify_offer(
-            session,
-            title=normalized.title,
-            merchant=normalized.merchant,
-            brand=normalized.brand,
-        )
+        classification = classify_offer(session, title=normalized.title, merchant=normalized.merchant, brand=normalized.brand)
         status = "ready" if _has_benefit(normalized) and classification.reason != "fallback" else "needs_review"
         offer = repo.create(
             status=status,
@@ -177,11 +178,7 @@ def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
             source_url=raw.source_url,
             raw_title=raw.title,
             raw_payload_json=json.dumps(
-                {
-                    **(raw.raw_payload or {}),
-                    "dedup_reason": match.reason,
-                    "dedup_score": match.score,
-                },
+                {**(raw.raw_payload or {}), "dedup_reason": match.reason, "dedup_score": match.score},
                 ensure_ascii=False,
             ),
             observed_at=now,
@@ -195,15 +192,7 @@ def _record_failed_collection(config: SourceConfig, error: Exception) -> RunResu
     message = f"{type(error).__name__}: {error}"
     with session_scope() as session:
         source = _ensure_source(session, config)
-        session.add(
-            ParseRun(
-                source_id=source.id,
-                status="failed",
-                finished_at=datetime.now(UTC),
-                error_count=1,
-                error=message,
-            )
-        )
+        session.add(ParseRun(source_id=source.id, status="failed", finished_at=datetime.now(UTC), error_count=1, error=message))
     return RunResult(source_key=config.key, errors=1, error=message)
 
 
@@ -246,8 +235,7 @@ def run_source(config: SourceConfig, *, city: str | None = None, region: str | N
                     OfferSourceObservation.observed_at >= parse_run.started_at,
                     Offer.status == "needs_review",
                 )
-            )
-            or 0
+            ) or 0
         )
         parse_run.error_count = result.errors
         parse_run.error = "\n".join(errors)[:10000] if errors else None
