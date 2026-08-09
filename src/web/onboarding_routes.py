@@ -15,6 +15,8 @@ from src.web.setup import (
     save_telegram_collector_setup,
     save_telegram_setup,
     save_vk_setup,
+    validate_telegram_setup,
+    validate_vk_setup,
 )
 
 router = APIRouter()
@@ -111,14 +113,21 @@ def onboarding_telegram_save(
     action: str = Form('save'),
 ):
     try:
-        save_telegram_setup(bot_token=bot_token, bot_name=bot_name, channel_id=channel_id, admin_ids=admin_ids)
+        bot_token, bot_name, channel_id, admin_ids = validate_telegram_setup(
+            bot_token=bot_token,
+            bot_name=bot_name,
+            channel_id=channel_id,
+            admin_ids=admin_ids,
+        )
     except ValueError as exc:
         return onboarding_telegram(error=str(exc))
     if action == 'test':
         ok, detail = _test_telegram(bot_token, channel_id)
         if not ok:
             return onboarding_telegram(error=detail)
+        save_telegram_setup(bot_token=bot_token, bot_name=bot_name, channel_id=channel_id, admin_ids=admin_ids)
         return onboarding_telegram(checked=detail)
+    save_telegram_setup(bot_token=bot_token, bot_name=bot_name, channel_id=channel_id, admin_ids=admin_ids)
     return RedirectResponse('/onboarding/2', status_code=303)
 
 
@@ -177,18 +186,18 @@ def onboarding_vk_save(
 ):
     if action == 'skip':
         return RedirectResponse('/onboarding/4', status_code=303)
-    token_to_save = access_token
-    if not token_to_save and get_settings().vk_access_token:
-        token_to_save = get_settings().vk_access_token or ''
+    token_to_save = access_token or (get_settings().vk_access_token or '')
     try:
-        save_vk_setup(access_token=token_to_save, api_version=api_version)
+        token_to_save, api_version = validate_vk_setup(access_token=token_to_save, api_version=api_version)
     except ValueError as exc:
         return onboarding_vk(error=str(exc))
     if action == 'test':
         ok, detail = _test_vk(token_to_save, api_version)
         if not ok:
             return onboarding_vk(error=detail)
+        save_vk_setup(access_token=token_to_save, api_version=api_version)
         return onboarding_vk(checked=detail)
+    save_vk_setup(access_token=token_to_save, api_version=api_version)
     return RedirectResponse('/onboarding/4', status_code=303)
 
 
