@@ -15,8 +15,8 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     env_path = tmp_path / '.env'
     example_path = tmp_path / '.env.example'
     example_path.write_text('DP_DATABASE_URL=sqlite:///./discount_parser.db\n', encoding='utf-8')
-    monkeypatch.setattr(web_setup, 'ENV_PATH', env_path)
-    monkeypatch.setattr(web_setup, 'ENV_EXAMPLE_PATH', example_path)
+    monkeypatch.setenv('DP_RUNTIME_ROOT', str(tmp_path))
+    monkeypatch.delenv('DP_ENV_FILE', raising=False)
     get_settings.cache_clear()
     yield env_path
     get_settings.cache_clear()
@@ -48,6 +48,29 @@ def test_setup_writes_env_and_redirects(isolated_env: Path) -> None:
     assert 'DP_TELEGRAM_BOT_NAME=Deals Bot' in text
     assert 'DP_TELEGRAM_CHANNEL_ID=@deals_channel' in text
     assert 'DP_TELEGRAM_ADMIN_IDS=123456789' in text
+
+
+def test_saved_setup_survives_settings_reload_and_next_request(isolated_env: Path) -> None:
+    web_setup.save_telegram_setup(
+        bot_token='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+        bot_name='Deals Bot',
+        channel_id='@deals_channel',
+        admin_ids='123456789',
+    )
+    assert web_setup.is_setup_complete() is True
+
+    # Simulate a fresh process-level settings load on the next application run.
+    get_settings.cache_clear()
+    settings = get_settings()
+    assert settings.telegram_bot_token == '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    assert settings.telegram_channel_id == '@deals_channel'
+    assert settings.telegram_admin_id_set == {123456789}
+    assert settings.setup_complete is True
+    assert web_setup.is_setup_complete() is True
+
+    client = TestClient(app)
+    response = client.get('/', follow_redirects=False)
+    assert response.status_code == 200
 
 
 def test_setup_rejects_non_numeric_admin_id(isolated_env: Path) -> None:
