@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 from urllib.parse import quote
 
 from fastapi import APIRouter, Form
@@ -55,9 +56,9 @@ def telegram_format_page(message: str | None = None):
             f'''<div class="tf-row" draggable="true" data-field="{html.escape(key)}"><span class="tf-handle" title="Перетащить">⋮⋮</span><input type="checkbox" name="enabled" value="{html.escape(key)}"{checked} aria-label="Показывать {html.escape(labels[key])}"><span class="tf-label">{html.escape(labels[key])}</span><button class="tf-move" type="button" data-move="up" aria-label="Поднять">↑</button><button class="tf-move" type="button" data-move="down" aria-label="Опустить">↓</button></div>'''
         )
     flash = f'<div class="tf-note">{html.escape(message)}</div>' if message else ''
-    sample_json = html.escape(str(_FIELD_SAMPLE).replace("'", '"'), quote=True)
+    sample_json = json.dumps(_FIELD_SAMPLE, ensure_ascii=False).replace('</', '<\\/')
     body = f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Формат публикации Telegram</title>{_STYLE}</head><body><main class="tf-wrap"><section class="tf-head"><div><h1>Формат публикации Telegram</h1><div class="tf-lead">Выберите, какие поля показывать в посте, и расположите их в нужном порядке. Заголовок и кнопка перехода остаются всегда.</div></div><a class="tf-secondary" href="/settings">← Настройки</a></section>{flash}<div class="tf-grid"><section class="tf-card"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center"><div><h2 style="margin:0 0 4px">Поля поста</h2><div class="tf-muted">Галочка включает поле. Меняйте порядок стрелками или перетаскиванием.</div></div><span class="tf-badge">без кода</span></div><form id="format-form" method="post" action="/settings/telegram-format"><input id="field-order" type="hidden" name="field_order" value="{html.escape(','.join(current.order))}"><div id="field-list">{''.join(rows)}</div><div class="tf-actions"><button class="tf-primary" type="submit">Сохранить формат</button><button class="tf-secondary" type="submit" formaction="/settings/telegram-format/reset">Вернуть стандартный</button></div></form></section><aside class="tf-card"><h2 style="margin-top:0">Предпросмотр</h2><div class="tf-muted" style="margin-bottom:10px">Пример меняется сразу. Реальный пост использует данные конкретного предложения.</div><div id="tf-preview" class="tf-preview"></div><div class="tf-muted" style="margin-top:10px">Полный исходный текст объявления в Telegram не копируется.</div></aside></div></main><script>
-const samples = JSON.parse("{sample_json}");
+const samples = {sample_json};
 const list = document.getElementById('field-list');
 const orderInput = document.getElementById('field-order');
 const preview = document.getElementById('tf-preview');
@@ -91,7 +92,7 @@ sync();
 
 
 @router.post('/settings/telegram-format')
-def save_telegram_format(field_order: str = Form(''), enabled: list[str] = Form(default=[])):
+def save_telegram_format(field_order: str = Form(''), enabled: list[str] = Form([])):
     redirect = _require_setup()
     if redirect:
         return redirect
