@@ -14,7 +14,7 @@ from src.telegram.publication_format import (
     save_publication_format,
 )
 from src.telegram.render import render_offer_caption
-from src.web import telegram_format_routes
+from src.web import telegram_format_routes, ux_routes
 from src.web.application import app
 
 
@@ -22,6 +22,7 @@ from src.web.application import app
 def format_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv('DP_RUNTIME_ROOT', str(tmp_path))
     monkeypatch.setattr(telegram_format_routes, 'is_setup_complete', lambda: True)
+    monkeypatch.setattr(ux_routes, 'is_setup_complete', lambda: True)
     yield tmp_path
 
 
@@ -101,18 +102,24 @@ def test_format_editor_page_and_post(format_runtime: Path) -> None:
 
     response = client.post(
         '/settings/telegram-format',
-        data=[
-            ('field_order', 'merchant,discount,category,conditions,geo'),
-            ('enabled', 'merchant'),
-            ('enabled', 'discount'),
-            ('enabled', 'conditions'),
-        ],
+        data={
+            'field_order': 'merchant,discount,category,conditions,geo',
+            'enabled': ['merchant', 'discount', 'conditions'],
+        },
         follow_redirects=False,
     )
     assert response.status_code == 303
     loaded = load_publication_format()
     assert loaded.order[:5] == ('merchant', 'discount', 'category', 'conditions', 'geo')
     assert loaded.enabled == frozenset({'merchant', 'discount', 'conditions'})
+
+
+def test_settings_page_links_to_format_editor(format_runtime: Path) -> None:
+    client = TestClient(app)
+    page = client.get('/settings')
+    assert page.status_code == 200
+    assert 'Формат публикации Telegram' in page.text
+    assert 'href="/settings/telegram-format"' in page.text
 
 
 def test_renderer_uses_persisted_customer_format(format_runtime: Path) -> None:
