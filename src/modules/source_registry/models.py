@@ -18,6 +18,7 @@ CANDIDATE_STATUSES = ("new", "approved", "rejected", "ignored", "invalid")
 ITEM_STATUSES = ("new", "processed", "ignored", "needs_review", "failed")
 TRUST_LEVELS = ("official", "verified", "community", "aggregator", "unknown")
 KEYWORD_KINDS = ("strong_positive", "positive", "negative", "merchant", "promo_code", "price", "custom")
+NETWORK_POLICIES = ("auto", "direct", "proxy", "system")
 
 
 class RegisteredSource(Base):
@@ -35,6 +36,10 @@ class RegisteredSource(Base):
             "trust_level IN ('official','verified','community','aggregator','unknown')",
             name="ck_registered_sources_trust",
         ),
+        CheckConstraint(
+            "network_policy IN ('auto','direct','proxy','system')",
+            name="ck_registered_sources_network_policy",
+        ),
         Index("ix_registered_sources_platform_enabled", "platform", "enabled"),
         Index("ix_registered_sources_merchant", "merchant"),
     )
@@ -50,6 +55,7 @@ class RegisteredSource(Base):
     brand: Mapped[str | None] = mapped_column(String(255))
     collector_type: Mapped[str] = mapped_column(String(80), nullable=False)
     auth_profile: Mapped[str | None] = mapped_column(String(80))
+    network_policy: Mapped[str] = mapped_column(String(16), default="auto", nullable=False)
     priority: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
     trust_level: Mapped[str] = mapped_column(String(32), default="unknown", nullable=False)
     check_interval_minutes: Mapped[int] = mapped_column(Integer, default=120, nullable=False)
