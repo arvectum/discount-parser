@@ -23,7 +23,7 @@ STYLE = '''
 
 
 def _layout(title: str, body: str) -> HTMLResponse:
-    nav = '''<div class="nav"><a href="/">Главная</a><a href="/offers">Предложения</a><a href="/runs">Журнал</a><a href="/system">Система</a></div>'''
+    nav = '''<div class="nav"><a href="/">Главная</a><a href="/offers">Предложения</a><a href="/runs">Журнал</a><a href="/system">Система</a><a href="/network">Сеть</a></div>'''
     return HTMLResponse(
         f'<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)}</title>{STYLE}</head><body><div class="wrap"><div class="top"><div><h1>{html.escape(title)}</h1><div class="muted">Discount Parser</div></div>{nav}</div>{body}</div></body></html>'
     )
@@ -45,9 +45,7 @@ def _doctor_html() -> str:
             badge = '<span class="pill off">ОШИБКА</span>'
         else:
             badge = '<span class="pill warn">ПРОВЕРИТЬ</span>'
-        rows.append(
-            f'<div class="check"><b>{html.escape(check.name)}</b>{badge}<span>{html.escape(check.detail)}</span></div>'
-        )
+        rows.append(f'<div class="check"><b>{html.escape(check.name)}</b>{badge}<span>{html.escape(check.detail)}</span></div>')
     overall = '<span class="pill on">ГОТОВО К ЛОКАЛЬНОМУ ТЕСТУ</span>' if report.ok else '<span class="pill off">ЕСТЬ БЛОКИРУЮЩИЕ ОШИБКИ</span>'
     return f'<div class="card"><div class="row" style="justify-content:space-between"><h3>Самодиагностика</h3>{overall}</div>{"".join(rows)}</div>'
 
@@ -69,13 +67,9 @@ def system_page():
     logs = []
     for name, label in (('bot', 'Telegram-бот'), ('scheduler', 'Scheduler')):
         text = read_process_log(name) or 'Лог пока пуст.'
-        logs.append(
-            f'<div class="card"><div class="row" style="justify-content:space-between"><h3>{label}: последние записи</h3>'
-            f'<form method="post" action="/system/logs/{name}/clear"><button class="btn secondary" type="submit">Очистить лог</button></form></div>'
-            f'<div class="log">{html.escape(text)}</div></div>'
-        )
+        logs.append(f'<div class="card"><div class="row" style="justify-content:space-between"><h3>{label}: последние записи</h3><form method="post" action="/system/logs/{name}/clear"><button class="btn secondary" type="submit">Очистить лог</button></form></div><div class="log">{html.escape(text)}</div></div>')
 
-    body = f'''{_doctor_html()}<div class="grid">{''.join(cards)}</div>{''.join(logs)}
+    body = f'''{_doctor_html()}<div class="card"><div class="row" style="justify-content:space-between"><div><h3>Сеть и VPN</h3><p class="muted">Split routing, proxy/VPN endpoint, диагностика Telegram и источников.</p></div><a class="btn secondary" href="/network">Открыть настройки сети</a></div></div><div class="grid">{''.join(cards)}</div>{''.join(logs)}
     <div class="card"><h3>Завершение приложения</h3><p class="muted">Остановит Telegram-бота, scheduler и локальную web-панель. После этого приложение можно снова запустить ярлыком.</p>
     <form method="post" action="/shutdown"><button class="btn bad" type="submit">Завершить Discount Parser</button></form></div>'''
     return _layout('Система', body)
@@ -102,7 +96,4 @@ def shutdown_application():
     if not is_setup_complete():
         return RedirectResponse('/setup', status_code=303)
     threading.Timer(0.5, _exit_application).start()
-    return _layout(
-        'Discount Parser завершён',
-        '<div class="card"><h3>Программа завершается</h3><p>Можно закрыть эту вкладку. Для следующего запуска используйте ярлык Discount Parser.</p></div>',
-    )
+    return _layout('Discount Parser завершён', '<div class="card"><h3>Программа завершается</h3><p>Можно закрыть эту вкладку. Для следующего запуска используйте ярлык Discount Parser.</p></div>')
