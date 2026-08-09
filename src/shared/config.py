@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     telegram_default_min_discount: int = 20
     autopost_interval_minutes: int = 30
 
+    # Application-owned network routing. Loopback is always direct regardless
+    # of these settings, so VPN/proxy configuration cannot steal the local UI.
+    network_mode: str = "auto"
+    proxy_url: str | None = None
+    proxy_username: str | None = None
+    proxy_password: str | None = None
+    no_proxy: str = "127.0.0.1,localhost,::1"
+    telegram_network_route: str = "auto"
+
     # Optional source-collection integrations. They are intentionally separate
     # from the Telegram publishing bot credentials.
     telegram_collector_mode: str = "public"
