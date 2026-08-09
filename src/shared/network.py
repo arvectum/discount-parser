@@ -4,7 +4,7 @@ import ipaddress
 import time
 from dataclasses import dataclass
 from threading import RLock
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse, urlsplit, urlunsplit
 
 import httpx
 
@@ -47,6 +47,26 @@ def is_loopback_url(url: str) -> bool:
         return False
 
 
+def configured_proxy_url() -> str | None:
+    settings = get_settings()
+    raw = (settings.proxy_url or "").strip()
+    if not raw:
+        return None
+    if not settings.proxy_username:
+        return raw
+    parts = urlsplit(raw)
+    if not parts.scheme or not parts.hostname:
+        return raw
+    username = quote(settings.proxy_username, safe="")
+    password = quote(settings.proxy_password or "", safe="")
+    auth = username + (f":{password}" if settings.proxy_password is not None else "")
+    host = parts.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    port = f":{parts.port}" if parts.port else ""
+    return urlunsplit((parts.scheme, f"{auth}@{host}{port}", parts.path, parts.query, parts.fragment))
+
+
 class NetworkRouter:
     """Application-owned HTTP routing with a hard loopback bypass.
 
@@ -71,18 +91,13 @@ class NetworkRouter:
         return (urlparse(url).hostname or url).lower()
 
     def _client(self, route: str, *, timeout: float, headers: dict[str, str] | None = None) -> httpx.Client:
-        settings = get_settings()
-        kwargs: dict[str, object] = {
-            "timeout": timeout,
-            "follow_redirects": True,
-            "headers": headers,
-        }
+        kwargs: dict[str, object] = {"timeout": timeout, "follow_redirects": True, "headers": headers}
         if route == "direct":
             kwargs["trust_env"] = False
         elif route == "system":
             kwargs["trust_env"] = True
         elif route == "proxy":
-            proxy_url = (settings.proxy_url or "").strip()
+            proxy_url = configured_proxy_url()
             if not proxy_url:
                 raise NetworkRouteError("proxy route requested but DP_PROXY_URL is empty")
             kwargs["trust_env"] = False
@@ -112,23 +127,13 @@ class NetworkRouter:
         candidates = [first]
         if first != "direct":
             candidates.append("direct")
-        if (get_settings().proxy_url or "").strip() and "proxy" not in candidates:
+        if configured_proxy_url() and "proxy" not in candidates:
             candidates.append("proxy")
         if "system" not in candidates:
             candidates.append("system")
         return candidates
 
-    def request(
-        self,
-        method: str,
-        url: str,
-        *,
-        route: str | None = None,
-        timeout: float = 20.0,
-        headers: dict[str, str] | None = None,
-        retry_statuses: set[int] | None = None,
-        **kwargs,
-    ) -> httpx.Response:
+    def request(self, method: str, url: str, *, route: str | None = None, timeout: float = 20.0, headers: dict[str, str] | None = None, retry_statuses: set[int] | None = None, **kwargs) -> httpx.Response:
         retry_statuses = retry_statuses or set()
         errors: list[str] = []
         for candidate in self._candidate_routes(url, route):
@@ -160,8 +165,6 @@ class NetworkRouter:
         try:
             response = self.request("GET", url, route=route, timeout=timeout)
             elapsed = int((time.monotonic() - started) * 1000)
-            # Connectivity is established even when the endpoint itself returns
-            # an application-level 4xx such as Telegram's API root.
             ok = response.status_code < 500
             return RouteProbe(url, route, ok, response.status_code, elapsed, f"HTTP {response.status_code}")
         except Exception as exc:
@@ -169,8 +172,7 @@ class NetworkRouter:
             return RouteProbe(url, route, False, None, elapsed, type(exc).__name__)
 
     def choose_route(self, url: str, *, timeout: float = 6.0) -> str:
-        candidates = self._candidate_routes(url, "auto")
-        for candidate in candidates:
+        for candidate in self._candidate_routes(url, "auto"):
             probe = self.probe(url, route=candidate, timeout=timeout)
             if probe.ok:
                 self.remember(url, candidate)
