@@ -7,14 +7,13 @@ from sqlalchemy import select
 
 from src.modules.source_registry.collectors import COLLECTORS, build_collector
 from src.modules.source_registry.models import RegisteredSource, SourceCandidate, SourceItem, SourceKeyword
-from src.modules.source_registry.seed import seed_registry
+from src.modules.source_registry.seed import TELEGRAM_TEST_SOURCES, seed_registry
 from src.modules.source_registry.service import (
     ItemPayload,
     add_keyword,
     create_source,
     detect_offer_signal,
     review_candidate,
-    seed_default_keywords,
     upsert_candidate,
     upsert_source_item,
 )
@@ -55,10 +54,14 @@ def test_registry_seed_is_idempotent(registry_db: Path) -> None:
         session.commit()
         sources = session.scalars(select(RegisteredSource)).all()
         keywords = session.scalars(select(SourceKeyword)).all()
-    assert first["sources_created"] == 1
+    assert first["sources_created"] == 1 + len(TELEGRAM_TEST_SOURCES)
     assert second["sources_created"] == 0
-    assert len(sources) == 1
-    assert sources[0].collector_type == "legacy_adapter"
+    assert len(sources) == 1 + len(TELEGRAM_TEST_SOURCES)
+    assert len([row for row in sources if row.collector_type == "legacy_adapter"]) == 1
+    telegram = [row for row in sources if row.platform == "telegram"]
+    assert len(telegram) == 5
+    assert all(row.collector_type == "telegram_public" for row in telegram)
+    assert all(row.network_policy == "auto" for row in telegram)
     assert keywords
 
 
@@ -73,16 +76,8 @@ def test_source_item_upsert_uses_external_id(registry_db: Path) -> None:
             collector_type="telegram_public",
             trust_level="official",
         )
-        first, first_created = upsert_source_item(
-            session,
-            source,
-            ItemPayload(external_id="example/100", url="https://t.me/example/100", title=None, text="Скидка 20%"),
-        )
-        second, second_created = upsert_source_item(
-            session,
-            source,
-            ItemPayload(external_id="example/100", url="https://t.me/example/100", title=None, text="Скидка 25%"),
-        )
+        first, first_created = upsert_source_item(session, source, ItemPayload(external_id="example/100", url="https://t.me/example/100", title=None, text="Скидка 20%"))
+        second, second_created = upsert_source_item(session, source, ItemPayload(external_id="example/100", url="https://t.me/example/100", title=None, text="Скидка 25%"))
         session.commit()
         count = len(session.scalars(select(SourceItem)).all())
     assert first.id == second.id
@@ -111,14 +106,7 @@ def test_negative_keyword_reduces_weak_signal(registry_db: Path) -> None:
 
 def test_candidate_approval_creates_registered_source(registry_db: Path) -> None:
     with create_session() as session:
-        candidate = upsert_candidate(
-            session,
-            platform="rutube",
-            url="https://rutube.ru/channel/123/",
-            name="Shop channel",
-            merchant="Shop",
-            confidence=0.8,
-        )
+        candidate = upsert_candidate(session, platform="rutube", url="https://rutube.ru/channel/123/", name="Shop channel", merchant="Shop", confidence=0.8)
         source = review_candidate(session, candidate.id, "approved", trust_level="official")
         session.commit()
         candidate_after = session.get(SourceCandidate, candidate.id)
