@@ -2,11 +2,12 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from src.shared.runtime_paths import env_path
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DP_",
-        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -64,4 +65,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # Resolve the env file at call time. This is important for frozen builds:
+    # modules are imported before distribution_entry changes cwd to the
+    # executable directory, so a module-level relative '.env' is unreliable.
+    return Settings(_env_file=env_path())
