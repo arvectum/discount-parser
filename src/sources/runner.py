@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
@@ -47,6 +47,26 @@ def _source_is_enabled(config: SourceConfig) -> bool:
         if source is None:
             return config.enabled
         return bool(source.enabled)
+
+
+def _effective_config(config: SourceConfig) -> SourceConfig:
+    """Overlay runtime registry network policy onto the legacy YAML adapter config.
+
+    Registry is the operator-facing source of truth for route overrides. A local
+    import avoids a module cycle because source_registry.runner imports this module.
+    """
+    try:
+        from src.modules.source_registry.models import RegisteredSource
+
+        with session_scope() as session:
+            registered = session.scalar(select(RegisteredSource).where(RegisteredSource.key == config.key))
+            if registered is not None and registered.network_policy:
+                return replace(config, network_policy=registered.network_policy)
+    except Exception:
+        # Fresh/pre-registry databases and migration-time imports must keep the
+        # legacy pipeline usable; YAML/default AUTO remains the fallback.
+        pass
+    return config
 
 
 def _non_empty(values: dict[str, object]) -> dict[str, object]:
@@ -197,6 +217,7 @@ def _record_failed_collection(config: SourceConfig, error: Exception) -> RunResu
 
 
 def run_source(config: SourceConfig, *, city: str | None = None, region: str | None = None) -> RunResult:
+    config = _effective_config(config)
     try:
         collected = build_adapter(config).collect()
     except Exception as exc:
