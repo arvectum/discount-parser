@@ -10,7 +10,7 @@ from src.web import launcher, processes, system_routes
 
 
 def test_system_routes_are_registered() -> None:
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in app.routes if hasattr(route, 'path')}
     assert '/system' in paths
     assert '/shutdown' in paths
     assert '/system/logs/{name}/clear' in paths
