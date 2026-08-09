@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 @dataclass(frozen=True, slots=True)
 class SourceConfig:
@@ -15,8 +17,19 @@ class SourceConfig:
     enabled: bool = True
 
 
+def _resolve_config_path(path: str | Path) -> Path:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate
+    cwd_candidate = Path.cwd() / candidate
+    if cwd_candidate.exists():
+        return cwd_candidate
+    return _PROJECT_ROOT / candidate
+
+
 def load_source_configs(path: str | Path = "config/sources.yaml") -> list[SourceConfig]:
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    config_path = _resolve_config_path(path)
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     result: list[SourceConfig] = []
     for item in data.get("sources", []):
         result.append(
@@ -32,7 +45,7 @@ def load_source_configs(path: str | Path = "config/sources.yaml") -> list[Source
 
 
 def set_source_enabled(key: str, enabled: bool, path: str | Path = "config/sources.yaml") -> SourceConfig:
-    config_path = Path(path)
+    config_path = _resolve_config_path(path)
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     for item in data.get("sources", []):
         if str(item.get("key")) == key:
