@@ -51,7 +51,7 @@ jobs:
           python -m src.cli smoke-report --help
 
   test-cross-platform:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     name: test (${{ matrix.os }}, py3.11)
     strategy:
       fail-fast: false
