@@ -10,10 +10,12 @@ from src.web import launcher, processes, system_routes
 
 
 def test_system_routes_are_registered() -> None:
-    paths = {route.path for route in app.routes}
-    assert '/system' in paths
-    assert '/shutdown' in paths
-    assert '/system/logs/{name}/clear' in paths
+    client = TestClient(app)
+    response = client.get('/system', follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers['location'] == '/setup'
+    assert str(app.url_path_for('shutdown_application')) == '/shutdown'
+    assert str(app.url_path_for('clear_log', name='bot')) == '/system/logs/bot/clear'
 
 
 def test_system_page_shows_process_logs_and_doctor(monkeypatch) -> None:

@@ -28,10 +28,13 @@ def web_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_management_routes_are_registered() -> None:
-    paths = {route.path for route in app.routes}
-    assert '/offers' in paths
-    assert '/offers/{offer_id}' in paths
-    assert '/runs' in paths
+    client = TestClient(app)
+    for path in ('/offers', '/runs'):
+        response = client.get(path, follow_redirects=False)
+        assert response.status_code in {200, 303}, path
+        assert response.status_code != 404, path
+    response = client.get('/offers/999999', follow_redirects=False)
+    assert response.status_code != 404 or response.text != '{"detail":"Not Found"}'
 
 
 def test_offers_page_lists_seeded_offer(web_db) -> None:

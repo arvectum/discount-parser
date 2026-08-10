@@ -5,9 +5,7 @@ import tempfile
 from pathlib import Path
 
 from src.shared.config import get_settings
-
-ENV_PATH = Path('.env')
-ENV_EXAMPLE_PATH = Path('.env.example')
+from src.shared.runtime_paths import env_example_path, env_path
 
 REQUIRED_TELEGRAM_KEYS = frozenset(
     {
@@ -18,7 +16,8 @@ REQUIRED_TELEGRAM_KEYS = frozenset(
 )
 
 
-def _read_env(path: Path = ENV_PATH) -> dict[str, str]:
+def _read_env(path: Path | None = None) -> dict[str, str]:
+    path = path or env_path()
     values: dict[str, str] = {}
     if not path.exists():
         return values
@@ -39,10 +38,12 @@ def _single_line(value: str, field_name: str) -> str:
 
 
 def _render_env(replacements: dict[str, str]) -> str:
-    if ENV_PATH.exists():
-        lines = ENV_PATH.read_text(encoding='utf-8').splitlines()
-    elif ENV_EXAMPLE_PATH.exists():
-        lines = ENV_EXAMPLE_PATH.read_text(encoding='utf-8').splitlines()
+    target = env_path()
+    example = env_example_path()
+    if target.exists():
+        lines = target.read_text(encoding='utf-8').splitlines()
+    elif example.exists():
+        lines = example.read_text(encoding='utf-8').splitlines()
     else:
         lines = []
 
@@ -81,27 +82,30 @@ def _atomic_write(path: Path, text: str) -> None:
 
 def _write_env_values(replacements: dict[str, str]) -> None:
     clean = {key: _single_line(str(value), key) for key, value in replacements.items()}
-    _atomic_write(ENV_PATH, _render_env(clean))
+    _atomic_write(env_path(), _render_env(clean))
     get_settings.cache_clear()
 
 
 def is_setup_complete() -> bool:
-    values = _read_env()
-    return all(values.get(key) for key in REQUIRED_TELEGRAM_KEYS)
+    # Use the same Settings loader as the rest of the application so wizard
+    # routing and runtime services always agree about persisted credentials.
+    try:
+        return get_settings().setup_complete
+    except (TypeError, ValueError):
+        return False
 
 
-def save_telegram_setup(
+def validate_telegram_setup(
     *,
     bot_token: str,
     bot_name: str,
     channel_id: str,
     admin_ids: str,
-) -> None:
+) -> tuple[str, str, str, str]:
     bot_token = _single_line(bot_token, 'Токен Telegram-бота')
     bot_name = _single_line(bot_name, 'Имя бота')
     channel_id = _single_line(channel_id, 'Telegram-канал')
     admin_ids = _single_line(admin_ids, 'Telegram user ID')
-
     if ':' not in bot_token or len(bot_token) < 20:
         raise ValueError('Похоже, токен Telegram-бота указан неверно.')
     if not channel_id:
@@ -113,13 +117,73 @@ def save_telegram_setup(
             int(value.strip())
     except ValueError as exc:
         raise ValueError('Telegram user ID должен быть числом. Несколько ID разделяйте запятыми.') from exc
+    return bot_token, bot_name, channel_id, admin_ids
 
+
+def save_telegram_setup(
+    *,
+    bot_token: str,
+    bot_name: str,
+    channel_id: str,
+    admin_ids: str,
+) -> None:
+    bot_token, bot_name, channel_id, admin_ids = validate_telegram_setup(
+        bot_token=bot_token,
+        bot_name=bot_name,
+        channel_id=channel_id,
+        admin_ids=admin_ids,
+    )
     _write_env_values(
         {
             'DP_TELEGRAM_BOT_TOKEN': bot_token,
             'DP_TELEGRAM_BOT_NAME': bot_name,
             'DP_TELEGRAM_CHANNEL_ID': channel_id,
             'DP_TELEGRAM_ADMIN_IDS': admin_ids,
+        }
+    )
+
+
+def save_telegram_collector_setup(
+    *,
+    mode: str,
+    api_id: str = '',
+    api_hash: str = '',
+    session: str = '',
+) -> None:
+    mode = _single_line(mode, 'Режим Telegram collector').lower() or 'public'
+    if mode not in {'public', 'mtproto'}:
+        raise ValueError('Неизвестный режим Telegram collector.')
+    api_id = _single_line(api_id, 'Telegram API ID')
+    api_hash = _single_line(api_hash, 'Telegram API Hash')
+    session = _single_line(session, 'Telegram session')
+    if mode == 'mtproto':
+        if not api_id or not api_id.isdigit():
+            raise ValueError('Для MTProto укажите числовой Telegram API ID.')
+        if len(api_hash) < 16:
+            raise ValueError('Для MTProto укажите Telegram API Hash.')
+    _write_env_values(
+        {
+            'DP_TELEGRAM_COLLECTOR_MODE': mode,
+            'DP_TELEGRAM_COLLECTOR_API_ID': api_id,
+            'DP_TELEGRAM_COLLECTOR_API_HASH': api_hash,
+            'DP_TELEGRAM_COLLECTOR_SESSION': session,
+        }
+    )
+
+
+def validate_vk_setup(*, access_token: str = '', api_version: str = '5.199') -> tuple[str, str]:
+    return (
+        _single_line(access_token, 'VK access token'),
+        _single_line(api_version, 'VK API version') or '5.199',
+    )
+
+
+def save_vk_setup(*, access_token: str = '', api_version: str = '5.199') -> None:
+    access_token, api_version = validate_vk_setup(access_token=access_token, api_version=api_version)
+    _write_env_values(
+        {
+            'DP_VK_ACCESS_TOKEN': access_token,
+            'DP_VK_API_VERSION': api_version,
         }
     )
 

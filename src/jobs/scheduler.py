@@ -9,6 +9,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.jobs.lifecycle import maintenance
+from src.modules.source_registry.runner import collect_registered_sources
 from src.shared.config import get_settings
 from src.sources.runner import run_all
 from src.telegram.autopost import run_autopost_cycle
@@ -18,15 +19,27 @@ logger = logging.getLogger(__name__)
 
 def collect_sources_job() -> None:
     settings = get_settings()
-    results = run_all(path=settings.sources_config_path)
+    legacy_results = run_all(path=settings.sources_config_path)
+    registry_results = []
+    registry_error = None
+    try:
+        registry_results = collect_registered_sources()
+    except Exception as exc:
+        # Registry collection is isolated from the proven legacy adapters. A
+        # schema/configuration issue must not stop scheduled promo collection.
+        registry_error = f"{type(exc).__name__}: {exc}"
+        logger.exception("scheduled_registry_collection_failed")
+
     logger.info(
         "scheduled_collection_finished",
         extra={
-            "sources": len(results),
-            "fetched": sum(item.fetched for item in results),
-            "created": sum(item.created for item in results),
-            "updated": sum(item.updated for item in results),
-            "errors": sum(item.errors for item in results),
+            "legacy_sources": len(legacy_results),
+            "registry_sources": len(registry_results),
+            "fetched": sum(item.fetched for item in legacy_results) + sum(item.fetched for item in registry_results),
+            "created": sum(item.created for item in legacy_results) + sum(item.offers_created for item in registry_results),
+            "updated": sum(item.updated for item in legacy_results) + sum(item.offers_updated for item in registry_results),
+            "errors": sum(item.errors for item in legacy_results) + sum(item.errors for item in registry_results),
+            "registry_error": registry_error,
         },
     )
 

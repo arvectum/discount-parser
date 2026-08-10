@@ -15,6 +15,12 @@ class RawOffer:
     merchant: str | None = None
     brand: str | None = None
     description: str | None = None
+    geo_scope: str | None = None
+    city: str | None = None
+    region: str | None = None
+    conditions: str | None = None
+    max_discount_amount: Decimal | None = None
+    min_order_amount: Decimal | None = None
     promo_code: str | None = None
     discount_percent: Decimal | None = None
     discount_amount: Decimal | None = None

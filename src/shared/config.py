@@ -2,11 +2,12 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from src.shared.runtime_paths import env_path
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DP_",
-        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -35,6 +36,24 @@ class Settings(BaseSettings):
     telegram_default_min_discount: int = 20
     autopost_interval_minutes: int = 30
 
+    # Application-owned network routing. Loopback is always direct regardless
+    # of these settings, so VPN/proxy configuration cannot steal the local UI.
+    network_mode: str = "auto"
+    proxy_url: str | None = None
+    proxy_username: str | None = None
+    proxy_password: str | None = None
+    no_proxy: str = "127.0.0.1,localhost,::1"
+    telegram_network_route: str = "auto"
+
+    # Optional source-collection integrations. They are intentionally separate
+    # from the Telegram publishing bot credentials.
+    telegram_collector_mode: str = "public"
+    telegram_collector_api_id: str | None = None
+    telegram_collector_api_hash: str | None = None
+    telegram_collector_session: str | None = None
+    vk_access_token: str | None = None
+    vk_api_version: str = "5.199"
+
     @property
     def telegram_admin_id_set(self) -> set[int]:
         result: set[int] = set()
@@ -55,4 +74,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # Resolve the env file at call time. This is important for frozen builds:
+    # modules are imported before distribution_entry changes cwd to the
+    # executable directory, so a module-level relative '.env' is unreliable.
+    return Settings(_env_file=env_path())

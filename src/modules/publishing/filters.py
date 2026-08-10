@@ -34,6 +34,8 @@ def update_default_filter(**values) -> PublishFilter:
         "offer_type",
         "merchant",
         "source_key",
+        "city",
+        "region",
         "max_posts_per_cycle",
     }
     unknown = set(values) - allowed

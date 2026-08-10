@@ -2,9 +2,14 @@ name: build-delivery
 
 on:
   workflow_dispatch:
+  pull_request:
   push:
     tags:
       - "v*"
+
+concurrency:
+  group: build-delivery-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -44,6 +49,10 @@ jobs:
           --hidden-import src.web.application
           --hidden-import src.web.management_pages
           --hidden-import src.web.system_routes
+          --hidden-import src.web.onboarding_routes
+          --hidden-import src.web.source_registry_routes
+          --hidden-import src.web.source_registry_static_routes
+          --collect-submodules src.modules.source_registry
           --collect-all uvicorn
           --collect-all python_calamine
           src/distribution_entry.py
@@ -55,6 +64,7 @@ jobs:
           --distpath dist-worker
           --workpath build-worker
           --name DiscountParserWorker
+          --collect-submodules src.modules.source_registry
           --collect-all python_calamine
           src/worker_entry.py
 
@@ -67,6 +77,10 @@ jobs:
           --hidden-import src.web.application
           --hidden-import src.web.management_pages
           --hidden-import src.web.system_routes
+          --hidden-import src.web.onboarding_routes
+          --hidden-import src.web.source_registry_routes
+          --hidden-import src.web.source_registry_static_routes
+          --collect-submodules src.modules.source_registry
           --collect-all uvicorn
           --collect-all python_calamine
           src/distribution_entry.py
@@ -95,7 +109,7 @@ jobs:
           cp alembic.ini delivery/app/alembic.ini
           cp .env.example delivery/app/.env.example
           cp packaging/macos/install.command delivery/install.command
-          chmod +x delivery/install.command delivery/app/DiscountParser
+          chmod +x delivery/install.command delivery/app/DiscountParser packaging/macos/build_dmg.sh
 
       - name: Frozen smoke Windows
         if: runner.os == 'Windows'
@@ -106,6 +120,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\DiscountParserWorker.exe doctor
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # This DB exists only to prove frozen migrations work. Never package
+          # it into Setup.exe: the installed application keeps the customer's
+          # persistent database in the same runtime directory.
+          Remove-Item .\discount_parser.db, .\discount_parser.db-wal, .\discount_parser.db-shm -Force -ErrorAction SilentlyContinue
+          if (Test-Path .\discount_parser.db) { throw "Smoke database must not be packaged" }
 
       - name: Frozen smoke macOS
         if: runner.os == 'macOS'
@@ -114,6 +133,14 @@ jobs:
         run: |
           ./DiscountParser migrate
           ./DiscountParser doctor
+
+      - name: Build macOS DMG
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bash packaging/macos/build_dmg.sh
+          test -f "delivery/DiscountParser.dmg"
+          test -x "delivery/Discount Parser.app/Contents/MacOS/DiscountParserLauncher"
 
       - name: Build native Windows installer
         if: runner.os == 'Windows'

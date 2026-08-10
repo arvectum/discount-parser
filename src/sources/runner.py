@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 
 from src.core.classification import classify_offer
+from src.core.conditions import extract_conditions
 from src.core.dedup import find_existing_offer
+from src.core.geo import extract_geo
 from src.core.normalization import NormalizedOffer, normalize_raw_offer
 from src.modules.offers.models import Offer, OfferSourceObservation, ParseRun, Source
 from src.modules.offers.repository import OfferRepository
@@ -47,6 +49,26 @@ def _source_is_enabled(config: SourceConfig) -> bool:
         return bool(source.enabled)
 
 
+def _effective_config(config: SourceConfig) -> SourceConfig:
+    """Overlay runtime registry network policy onto the legacy YAML adapter config.
+
+    Registry is the operator-facing source of truth for route overrides. A local
+    import avoids a module cycle because source_registry.runner imports this module.
+    """
+    try:
+        from src.modules.source_registry.models import RegisteredSource
+
+        with session_scope() as session:
+            registered = session.scalar(select(RegisteredSource).where(RegisteredSource.key == config.key))
+            if registered is not None and registered.network_policy:
+                return replace(config, network_policy=registered.network_policy)
+    except Exception:
+        # Fresh/pre-registry databases and migration-time imports must keep the
+        # legacy pipeline usable; YAML/default AUTO remains the fallback.
+        pass
+    return config
+
+
 def _non_empty(values: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in values.items() if value is not None and value != ""}
 
@@ -64,13 +86,34 @@ def _has_benefit(normalized: NormalizedOffer) -> bool:
     ) or bool(normalized.promo_code) or "бесплат" in normalized.title.lower()
 
 
+def _raw_matches_geo(raw: RawOffer, *, city: str | None = None, region: str | None = None) -> bool:
+    target_city = (city or "").strip().casefold()
+    target_region = (region or "").strip().casefold()
+    if not target_city and not target_region:
+        return True
+    geo = extract_geo(raw.title, raw.description, city=raw.city, region=raw.region, scope=raw.geo_scope)
+    if target_city and (geo.city or "").casefold() != target_city:
+        return False
+    if target_region and (geo.region or "").casefold() != target_region:
+        return False
+    return True
+
+
 def _normalized_values(raw: RawOffer, normalized: NormalizedOffer, now: datetime) -> dict[str, object]:
+    geo = extract_geo(raw.title, raw.description, city=raw.city, region=raw.region, scope=raw.geo_scope)
+    condition = extract_conditions(raw.title, raw.description, explicit=raw.conditions)
     return _non_empty(
         {
             "title": normalized.title,
             "description": raw.description,
             "merchant": normalized.merchant,
             "brand": normalized.brand,
+            "geo_scope": geo.scope,
+            "city": geo.city,
+            "region": geo.region,
+            "conditions": condition.conditions,
+            "max_discount_amount": raw.max_discount_amount or condition.max_discount_amount,
+            "min_order_amount": raw.min_order_amount or condition.min_order_amount,
             "promo_code": normalized.promo_code,
             "discount_percent": normalized.discount_percent,
             "discount_amount": normalized.discount_amount,
@@ -137,12 +180,7 @@ def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
         offer = match.offer
         _update_offer(session, offer, raw, normalized, now)
     else:
-        classification = classify_offer(
-            session,
-            title=normalized.title,
-            merchant=normalized.merchant,
-            brand=normalized.brand,
-        )
+        classification = classify_offer(session, title=normalized.title, merchant=normalized.merchant, brand=normalized.brand)
         status = "ready" if _has_benefit(normalized) and classification.reason != "fallback" else "needs_review"
         offer = repo.create(
             status=status,
@@ -160,11 +198,7 @@ def _persist_raw_offer(session, source: Source, raw: RawOffer) -> bool:
             source_url=raw.source_url,
             raw_title=raw.title,
             raw_payload_json=json.dumps(
-                {
-                    **(raw.raw_payload or {}),
-                    "dedup_reason": match.reason,
-                    "dedup_score": match.score,
-                },
+                {**(raw.raw_payload or {}), "dedup_reason": match.reason, "dedup_score": match.score},
                 ensure_ascii=False,
             ),
             observed_at=now,
@@ -178,24 +212,18 @@ def _record_failed_collection(config: SourceConfig, error: Exception) -> RunResu
     message = f"{type(error).__name__}: {error}"
     with session_scope() as session:
         source = _ensure_source(session, config)
-        session.add(
-            ParseRun(
-                source_id=source.id,
-                status="failed",
-                finished_at=datetime.now(UTC),
-                error_count=1,
-                error=message,
-            )
-        )
+        session.add(ParseRun(source_id=source.id, status="failed", finished_at=datetime.now(UTC), error_count=1, error=message))
     return RunResult(source_key=config.key, errors=1, error=message)
 
 
-def run_source(config: SourceConfig) -> RunResult:
+def run_source(config: SourceConfig, *, city: str | None = None, region: str | None = None) -> RunResult:
+    config = _effective_config(config)
     try:
-        raw_offers = build_adapter(config).collect()
+        collected = build_adapter(config).collect()
     except Exception as exc:
         return _record_failed_collection(config, exc)
 
+    raw_offers = [raw for raw in collected if _raw_matches_geo(raw, city=city, region=region)]
     result = RunResult(source_key=config.key, fetched=len(raw_offers))
     with session_scope() as session:
         source = _ensure_source(session, config)
@@ -228,8 +256,7 @@ def run_source(config: SourceConfig) -> RunResult:
                     OfferSourceObservation.observed_at >= parse_run.started_at,
                     Offer.status == "needs_review",
                 )
-            )
-            or 0
+            ) or 0
         )
         parse_run.error_count = result.errors
         parse_run.error = "\n".join(errors)[:10000] if errors else None
@@ -239,12 +266,18 @@ def run_source(config: SourceConfig) -> RunResult:
     return result
 
 
-def run_all(path: str = "config/sources.yaml", only: str | None = None) -> list[RunResult]:
+def run_all(
+    path: str = "config/sources.yaml",
+    only: str | None = None,
+    *,
+    city: str | None = None,
+    region: str | None = None,
+) -> list[RunResult]:
     results: list[RunResult] = []
     for config in load_source_configs(path):
         if not _source_is_enabled(config):
             continue
         if only and config.key != only:
             continue
-        results.append(run_source(config))
+        results.append(run_source(config, city=city, region=region))
     return results

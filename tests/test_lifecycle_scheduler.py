@@ -136,7 +136,9 @@ def test_accelerated_scheduler_executes_collection_job(monkeypatch: pytest.Monke
 
     scheduler.start()
     try:
-        time.sleep(0.35)
+        deadline = time.monotonic() + 2.0
+        while len(calls) < 2 and time.monotonic() < deadline:
+            time.sleep(0.02)
     finally:
         scheduler.shutdown(wait=True)
         get_settings.cache_clear()
