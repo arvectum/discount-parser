@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from src.modules.offers.models import Offer, OfferSourceObservation, Publication, PublishFilter, Source
+from src.core.validity import extract_valid_until
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,4 +78,14 @@ def list_publish_candidates(
     query = query.order_by(Offer.discount_percent.desc().nullslast(), Offer.first_seen_at.desc()).limit(
         max(1, min(criteria.limit, 100))
     )
-    return list(session.scalars(query).all())
+    now = datetime.now(UTC)
+    result: list[Offer] = []
+    for offer in session.scalars(query).all():
+        expiry = offer.valid_until or extract_valid_until("\n".join(v for v in (offer.title, offer.description, offer.conditions) if v), now=now)
+        if expiry:
+            offer.valid_until = expiry
+        if expiry and expiry < now:
+            offer.status = "expired"
+            continue
+        result.append(offer)
+    return result

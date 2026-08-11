@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from src.modules.offers.models import Offer, OfferSourceObservation, ParseRun
 from src.shared.db import session_scope
+from src.core.validity import extract_valid_until
 
 _ACTIVE_STATUSES = {"new", "ready", "needs_review"}
 
@@ -16,6 +17,14 @@ def expire_offers(*, now: datetime | None = None) -> int:
     current = now or datetime.now(UTC)
     changed = 0
     with session_scope() as session:
+        undated = session.scalars(select(Offer).where(Offer.status.in_(_ACTIVE_STATUSES), Offer.valid_until.is_(None))).all()
+        for offer in undated:
+            expiry = extract_valid_until("\n".join(v for v in (offer.title, offer.description, offer.conditions) if v), now=current)
+            if expiry:
+                offer.valid_until = expiry
+                if expiry < current:
+                    offer.status = "expired"
+                    changed += 1
         offers = session.scalars(
             select(Offer).where(
                 Offer.status.in_(_ACTIVE_STATUSES),

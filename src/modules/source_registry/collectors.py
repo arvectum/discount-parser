@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 
 from src.modules.source_registry.models import RegisteredSource
 from src.modules.source_registry.service import ItemPayload
+from src.core.validity import extract_valid_until
 from src.shared.config import get_settings
 from src.shared.network import network_router
 
@@ -64,6 +65,9 @@ class GenericWebCollector(HttpCollectorBase):
         soup = BeautifulSoup(response.text, "html.parser")
         for tag in soup(["script", "style", "noscript", "svg"]):
             tag.decompose()
+        profile_items = self._profile_items(source, soup, str(response.url))
+        if profile_items:
+            return profile_items
 
         candidates = soup.select("article, main section, [class*=promo], [class*=sale], [class*=action], [class*=offer]")
         if not candidates:
@@ -89,6 +93,45 @@ class GenericWebCollector(HttpCollectorBase):
             result.append(ItemPayload(external_id=digest, url=item_url, title=title, text=text, image_url=image_url, raw_payload={"collector": "generic_web", "network_policy": source.network_policy}))
             if len(result) >= self.policy.max_items:
                 break
+        return result
+
+    @staticmethod
+    def _value(node, selector: str | None, attribute: str | None = None) -> str | None:
+        if not selector:
+            return None
+        target = node.select_one(selector)
+        if target is None:
+            return None
+        value = target.get(attribute) if attribute else target.get_text(" ", strip=True)
+        value = str(value or "").strip()
+        return value or None
+
+    def _profile_items(self, source: RegisteredSource, soup: BeautifulSoup, page_url: str) -> list[ItemPayload]:
+        if not source.item_selector:
+            return []
+        try:
+            containers = soup.select(source.item_selector)
+        except Exception as exc:
+            raise CollectorError(f"invalid extraction CSS selector: {exc}") from exc
+        result: list[ItemPayload] = []
+        for container in containers[:self.policy.max_items]:
+            text = " ".join(container.stripped_strings)[:12000]
+            if not text:
+                continue
+            title = self._value(container, source.title_selector) or text[:1000]
+            promo = self._value(container, source.promo_code_selector, source.promo_code_attribute)
+            conditions = self._value(container, source.conditions_selector)
+            validity_text = self._value(container, source.valid_until_selector)
+            reveal = self._value(container, source.reveal_selector, source.reveal_code_attribute)
+            if not promo and reveal:
+                promo = reveal
+            link = self._value(container, source.link_selector, "href")
+            item_url = urljoin(page_url, link) if link else page_url
+            digest = hashlib.sha256(f"{item_url}|{title}|{text}".encode()).hexdigest()
+            result.append(ItemPayload(digest, item_url, title, text, raw_payload={
+                "collector": "css_profile", "promo_code": promo, "conditions": conditions,
+                "valid_until": (extract_valid_until(validity_text or text).isoformat() if extract_valid_until(validity_text or text) else None),
+            }))
         return result
 
 

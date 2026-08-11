@@ -12,6 +12,7 @@ from src.modules.source_registry.service import detect_offer_signal, upsert_sour
 from src.shared.db import session_scope
 from src.sources.base import RawOffer
 from src.sources.runner import _persist_raw_offer
+from src.core.validity import extract_valid_until
 
 
 @dataclass(slots=True)
@@ -127,6 +128,8 @@ def collect_registered_source(source_id: int) -> RegistryRunResult:
             try:
                 item, created = upsert_source_item(session, source, payload)
                 result.items_created += int(created)
+                metadata = dict(payload.raw_payload or {})
+                valid_until = extract_valid_until(str(metadata.get("valid_until") or ""))
                 combined_text = "\n".join(part for part in (payload.title, payload.text) if part)
                 signal = detect_offer_signal(combined_text, keywords)
                 if not signal.is_offer:
@@ -143,12 +146,14 @@ def collect_registered_source(source_id: int) -> RegistryRunResult:
                     merchant=source.merchant,
                     brand=source.brand,
                     description=payload.text,
-                    promo_code=signal.promo_code,
+                    conditions=str(metadata.get("conditions") or "").strip() or None,
+                    promo_code=str(metadata.get("promo_code") or "").strip() or signal.promo_code,
                     discount_percent=signal.discount_percent,
                     old_price=signal.old_price,
                     new_price=signal.new_price,
                     image_url=payload.image_url,
                     valid_from=payload.published_at,
+                    valid_until=valid_until,
                     raw_payload={
                         "registered_source_id": source.id,
                         "source_item_id": item.id,
