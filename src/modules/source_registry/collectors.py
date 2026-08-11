@@ -14,6 +14,9 @@ from src.modules.source_registry.service import ItemPayload
 from src.core.validity import extract_valid_until
 from src.shared.config import get_settings
 from src.shared.network import network_router
+from src.sources.adapters.promko import PromkoAdapter
+from src.sources.adapters.promokood import PromokoodAdapter
+from src.sources.base import RawOffer
 
 
 class CollectorError(RuntimeError):
@@ -68,6 +71,9 @@ class GenericWebCollector(HttpCollectorBase):
         profile_items = self._profile_items(source, soup, str(response.url))
         if profile_items:
             return profile_items
+        known_items = self._known_site_items(source, str(response.url), str(soup))
+        if known_items:
+            return known_items
 
         candidates = soup.select("article, main section, [class*=promo], [class*=sale], [class*=action], [class*=offer]")
         if not candidates:
@@ -94,6 +100,21 @@ class GenericWebCollector(HttpCollectorBase):
             if len(result) >= self.policy.max_items:
                 break
         return result
+
+    @staticmethod
+    def _raw_offer_payload(raw: RawOffer, *, adapter: str) -> ItemPayload:
+        metadata = dict(raw.raw_payload or {})
+        metadata.update({"collector": "known_site_adapter", "adapter": adapter, "promo_code": raw.promo_code,
+                         "conditions": raw.conditions, "valid_until": raw.valid_until.isoformat() if raw.valid_until else None})
+        return ItemPayload(raw.external_id, raw.source_url, raw.title, raw.description or raw.title, image_url=raw.image_url, raw_payload=metadata)
+
+    def _known_site_items(self, source: RegisteredSource, page_url: str, html: str) -> list[ItemPayload]:
+        parsed = urlparse(source.url); host = (parsed.hostname or "").casefold().removeprefix("www.")
+        if host == "promko.net" and "/shops/" in parsed.path.casefold():
+            return [self._raw_offer_payload(raw, adapter="promko") for raw in PromkoAdapter(page_url).parse(html)]
+        if host == "promokood.ru" and parsed.path.casefold().startswith("/o/"):
+            return [self._raw_offer_payload(raw, adapter="promokood") for raw in PromokoodAdapter(page_url).parse(html)]
+        return []
 
     @staticmethod
     def _value(node, selector: str | None, attribute: str | None = None) -> str | None:
@@ -123,13 +144,15 @@ class GenericWebCollector(HttpCollectorBase):
             conditions = self._value(container, source.conditions_selector)
             validity_text = self._value(container, source.valid_until_selector)
             reveal = self._value(container, source.reveal_selector, source.reveal_code_attribute)
-            if not promo and reveal:
+            is_promko_coupon = ((urlparse(source.url).hostname or "").casefold().removeprefix("www.") == "promko.net" and source.reveal_code_attribute and source.reveal_code_attribute.casefold() == "data-coupon-id" and reveal and reveal.isdigit())
+            if not promo and reveal and not is_promko_coupon:
                 promo = reveal
             link = self._value(container, source.link_selector, "href")
             item_url = urljoin(page_url, link) if link else page_url
             digest = hashlib.sha256(f"{item_url}|{title}|{text}".encode()).hexdigest()
             result.append(ItemPayload(digest, item_url, title, text, raw_payload={
                 "collector": "css_profile", "promo_code": promo, "conditions": conditions,
+                "promko_coupon_id": reveal if is_promko_coupon else None, "needs_reveal": bool(is_promko_coupon and not promo),
                 "valid_until": (extract_valid_until(validity_text or text).isoformat() if extract_valid_until(validity_text or text) else None),
             }))
         return result
