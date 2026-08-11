@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 
-from src.modules.offers.models import Source
+from src.modules.offers.models import Offer, OfferSourceObservation, Source
 from src.modules.source_registry.collectors import CredentialsRequired, build_collector
 from src.modules.source_registry.models import RegisteredSource, SourceKeyword
 from src.modules.source_registry.service import detect_offer_signal, upsert_source_item
+from src.modules.source_registry.promko_reveal import reveal_promko_code
 from src.shared.db import session_scope
 from src.sources.base import RawOffer
 from src.sources.runner import _persist_raw_offer
@@ -25,6 +27,59 @@ class RegistryRunResult:
     ignored: int = 0
     errors: int = 0
     error: str | None = None
+
+
+def _stored_promo_code(session, source: Source, external_id: str) -> str | None:
+    offer = session.scalar(
+        select(Offer).join(OfferSourceObservation).where(
+            OfferSourceObservation.source_id == source.id,
+            OfferSourceObservation.external_id == external_id,
+        )
+    )
+    value = str(offer.promo_code or "").strip() if offer else ""
+    return value or None
+
+
+def _payload_valid_until(metadata: dict) -> datetime | None:
+    value = metadata.get("valid_until")
+    if not value:
+        return None
+    try:
+        result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return result.replace(tzinfo=UTC) if result.tzinfo is None else result
+    except ValueError:
+        return None
+
+
+def _resolve_promko_code(session, *, source: RegisteredSource, legacy_source: Source,
+                         payload, item_created: bool, metadata: dict,
+                         result: RegistryRunResult) -> str | None:
+    coupon_id = str(metadata.get("promko_coupon_id") or "").strip()
+    explicit = str(metadata.get("promo_code") or "").strip()
+    if not coupon_id:
+        return explicit or None
+    if explicit:
+        return explicit
+    if not item_created:
+        stored = _stored_promo_code(session, legacy_source, payload.external_id or "")
+        if stored:
+            metadata.update(promko_reveal_resolved=True, promko_reveal_reused=True, promo_code=stored)
+            return stored
+        message = f"PROMKO reveal {coupon_id}: unresolved; automatic retry disabled"
+        metadata.update(promko_reveal_resolved=False, promko_reveal_reused=False, promko_reveal_error=message)
+        result.errors += 1
+        result.error = message
+        return None
+    try:
+        code = reveal_promko_code(coupon_id, referer=source.url, route=source.network_policy)
+    except Exception as exc:
+        message = f"PROMKO reveal {coupon_id}: {type(exc).__name__}: {exc}"
+        metadata.update(promko_reveal_resolved=False, promko_reveal_reused=False, promko_reveal_error=message)
+        result.errors += 1
+        result.error = message
+        return None
+    metadata.update(promo_code=code, promko_reveal_resolved=True, promko_reveal_reused=False, promko_reveal_error=None)
+    return code
 
 
 def _legacy_source(session, registered: RegisteredSource) -> Source:
@@ -127,13 +182,26 @@ def collect_registered_source(source_id: int) -> RegistryRunResult:
             try:
                 item, created = upsert_source_item(session, source, payload)
                 result.items_created += int(created)
+                metadata = dict(payload.raw_payload or {})
+                valid_until = _payload_valid_until(metadata)
+                if valid_until is not None and valid_until < datetime.now(UTC):
+                    item.processing_status = "ignored"
+                    item.raw_payload_json = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+                    result.ignored += 1
+                    continue
                 combined_text = "\n".join(part for part in (payload.title, payload.text) if part)
                 signal = detect_offer_signal(combined_text, keywords)
                 if not signal.is_offer:
                     item.processing_status = "ignored"
+                    item.raw_payload_json = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
                     result.ignored += 1
                     continue
                 result.offer_signals += 1
+                promo_code = _resolve_promko_code(
+                    session, source=source, legacy_source=legacy_source, payload=payload,
+                    item_created=created, metadata=metadata, result=result,
+                ) or signal.promo_code
+                item.raw_payload_json = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
                 title = (payload.title or payload.text or "Предложение").strip().splitlines()[0][:1000]
                 raw = RawOffer(
                     source_key=legacy_source.key,
@@ -143,19 +211,20 @@ def collect_registered_source(source_id: int) -> RegistryRunResult:
                     merchant=source.merchant,
                     brand=source.brand,
                     description=payload.text,
-                    promo_code=signal.promo_code,
+                    promo_code=promo_code,
                     discount_percent=signal.discount_percent,
                     old_price=signal.old_price,
                     new_price=signal.new_price,
                     image_url=payload.image_url,
                     valid_from=payload.published_at,
+                    valid_until=valid_until,
                     raw_payload={
                         "registered_source_id": source.id,
                         "source_item_id": item.id,
                         "platform": source.platform,
                         "matched_keywords": list(signal.matched_keywords),
                         "signal_confidence": signal.confidence,
-                        "source_item_payload": payload.raw_payload,
+                        "source_item_payload": metadata,
                     },
                 )
                 created_offer = _persist_raw_offer(session, legacy_source, raw)

@@ -13,6 +13,9 @@ from src.modules.source_registry.models import RegisteredSource
 from src.modules.source_registry.service import ItemPayload
 from src.shared.config import get_settings
 from src.shared.network import network_router
+from src.sources.adapters.promko import PromkoAdapter
+from src.sources.adapters.promokood import PromokoodAdapter
+from src.sources.base import RawOffer
 
 
 class CollectorError(RuntimeError):
@@ -65,6 +68,16 @@ class GenericWebCollector(HttpCollectorBase):
         for tag in soup(["script", "style", "noscript", "svg"]):
             tag.decompose()
 
+        # A merchant-specific parser is deliberately selected after page fetch
+        # and sanitisation.  This keeps an operator-provided CSS profile (when
+        # present in a newer registry schema) authoritative.
+        profile_items = self._profile_items(source, soup, str(response.url))
+        if profile_items:
+            return profile_items
+        known = self._known_site_items(source, str(response.url), str(soup))
+        if known:
+            return known
+
         candidates = soup.select("article, main section, [class*=promo], [class*=sale], [class*=action], [class*=offer]")
         if not candidates:
             candidates = [soup.body or soup]
@@ -90,6 +103,77 @@ class GenericWebCollector(HttpCollectorBase):
             if len(result) >= self.policy.max_items:
                 break
         return result
+
+    @staticmethod
+    def _raw_offer_payload(raw: RawOffer, *, collector: str, adapter: str) -> ItemPayload:
+        metadata = dict(raw.raw_payload or {})
+        metadata.update({
+            "collector": collector,
+            "adapter": adapter,
+            "promo_code": raw.promo_code,
+            "conditions": raw.conditions,
+            "valid_until": raw.valid_until.isoformat() if raw.valid_until else None,
+        })
+        return ItemPayload(raw.external_id, raw.source_url, raw.title, raw.description or raw.title,
+                           image_url=raw.image_url, raw_payload=metadata)
+
+    def _known_site_items(self, source: RegisteredSource, page_url: str, html: str) -> list[ItemPayload]:
+        parsed = urlparse(source.url)
+        host = (parsed.hostname or "").casefold().removeprefix("www.")
+        path = parsed.path.casefold()
+        if host == "promko.net" and "/shops/" in path:
+            return [self._raw_offer_payload(raw, collector="known_site_adapter", adapter="promko")
+                    for raw in PromkoAdapter(page_url).parse(html)]
+        if host == "promokood.ru" and path.startswith("/o/"):
+            return [self._raw_offer_payload(raw, collector="known_site_adapter", adapter="promokood")
+                    for raw in PromokoodAdapter(page_url).parse(html)]
+        return []
+
+    def _profile_items(self, source: RegisteredSource, soup: BeautifulSoup, page_url: str) -> list[ItemPayload]:
+        """Compatibility hook for the extraction-profile schema.
+
+        Older installations have no profile column; in that case this is a
+        harmless no-op.  It also specifically protects PROMKO coupon ids from
+        being mistaken for revealed promo codes.
+        """
+        profile = getattr(source, "extraction_profile_json", None)
+        if not profile:
+            return []
+        try:
+            import json
+            config = json.loads(profile) if isinstance(profile, str) else dict(profile)
+        except (TypeError, ValueError):
+            return []
+        selector = config.get("item_selector")
+        if not selector:
+            return []
+        items: list[ItemPayload] = []
+        host = (urlparse(source.url).hostname or "").casefold().removeprefix("www.")
+        for node in soup.select(selector):
+            text = " ".join(node.stripped_strings)[:12000]
+            if not text:
+                continue
+            title_node = node.select_one(config.get("title_selector", "")) if config.get("title_selector") else None
+            promo_node = node.select_one(config.get("promo_code_selector", "")) if config.get("promo_code_selector") else None
+            promo = " ".join(promo_node.stripped_strings).strip() if promo_node else None
+            if promo and self._masked(promo):
+                promo = None
+            reveal_value = None
+            if not promo and config.get("reveal_selector") and config.get("reveal_code_attribute"):
+                reveal = node.select_one(config["reveal_selector"])
+                if reveal:
+                    reveal_value = str(reveal.get(config["reveal_code_attribute"]) or "").strip() or None
+                if not (host == "promko.net" and config["reveal_code_attribute"].casefold() == "data-coupon-id" and reveal_value and reveal_value.isdigit()):
+                    promo = reveal_value or None
+            coupon_id = reveal_value if host == "promko.net" and config.get("reveal_code_attribute", "").casefold() == "data-coupon-id" and reveal_value and reveal_value.isdigit() else None
+            title = " ".join(title_node.stripped_strings)[:1000] if title_node else text[:1000]
+            external_id = f"promko-coupon:{coupon_id}" if coupon_id else hashlib.sha256(text.encode()).hexdigest()
+            items.append(ItemPayload(external_id, page_url, title, text, raw_payload={"collector": "css_profile", "promo_code": promo, "promko_coupon_id": coupon_id, "needs_reveal": bool(coupon_id and not promo)}))
+        return items
+
+    @staticmethod
+    def _masked(value: str | None) -> bool:
+        return not value or bool(re.fullmatch(r"[•*\s]+", value))
 
 
 class PublicPageCollector(GenericWebCollector):
