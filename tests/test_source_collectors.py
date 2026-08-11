@@ -70,7 +70,7 @@ def test_telegram_public_collector_extracts_post(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(collector, "_get", _stub_get(html))
     items = collector.collect(_source(platform="telegram", url="https://t.me/shop", external_id="shop", collector_type="telegram_public"))
     assert len(items) == 1
-    assert items[0].external_id == "shop/42"
+    assert items[0].external_id == "telegram:shop:42"
     assert "SALE20" in (items[0].text or "")
     assert items[0].url == "https://t.me/shop/42"
 

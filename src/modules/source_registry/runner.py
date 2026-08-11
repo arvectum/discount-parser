@@ -159,12 +159,12 @@ def collect_registered_source(source_id: int) -> RegistryRunResult:
                 item, created = upsert_source_item(session, source, payload)
                 result.items_created += int(created)
                 metadata = dict(payload.raw_payload or {})
-                valid_until = extract_valid_until(str(metadata.get("valid_until") or ""))
+                combined_text = "\n".join(part for part in (payload.title, payload.text) if part)
+                valid_until = extract_valid_until(str(metadata.get("valid_until") or "")) or extract_valid_until(combined_text)
                 if valid_until is not None and valid_until < datetime.now(UTC):
                     item.processing_status = "ignored"; item.raw_payload_json = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
                     result.ignored += 1
                     continue
-                combined_text = "\n".join(part for part in (payload.title, payload.text) if part)
                 signal = detect_offer_signal(combined_text, keywords)
                 if not signal.is_offer:
                     item.processing_status = "ignored"

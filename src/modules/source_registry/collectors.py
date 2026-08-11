@@ -27,6 +27,30 @@ class CredentialsRequired(CollectorError):
     pass
 
 
+def normalize_telegram_channel(value: str | None) -> str:
+    """Return a public Telegram channel username without transport syntax."""
+    raw = (value or "").strip()
+    if not raw:
+        raise CollectorError("Telegram public channel is empty")
+    if raw.startswith("@"):
+        raw = raw[1:]
+    elif "://" in raw:
+        parsed = urlparse(raw)
+        if parsed.hostname not in {"t.me", "www.t.me", "telegram.me", "www.telegram.me"}:
+            raise CollectorError("Telegram public channel must use t.me or telegram.me")
+        parts = [part for part in parsed.path.split("/") if part]
+        if parts[:1] == ["s"]:
+            parts = parts[1:]
+        if len(parts) != 1:
+            raise CollectorError("Telegram URL must identify a channel, not a post or invite")
+        raw = parts[0]
+    if raw.startswith("+") or raw.casefold().startswith(("joinchat/", "joinchat")):
+        raise CollectorError("Telegram invite/private links are not supported for public collection")
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,127}", raw):
+        raise CollectorError("invalid Telegram public channel username")
+    return raw
+
+
 class SourceCollector(Protocol):
     def collect(self, source: RegisteredSource) -> list[ItemPayload]: ...
 
@@ -170,33 +194,34 @@ class TelegramPublicCollector(HttpCollectorBase):
     """Collect public preview posts from a known t.me channel without user auth."""
 
     def collect(self, source: RegisteredSource) -> list[ItemPayload]:
-        parsed = urlparse(source.url)
-        channel = source.external_id
-        if not channel:
-            path = parsed.path.strip("/")
-            if path.startswith("s/"):
-                path = path[2:]
-            channel = path.split("/")[0]
-        if not channel:
-            raise CollectorError("Telegram source requires channel username/external_id")
-        url = f"https://t.me/s/{channel.lstrip('@')}"
+        channel = normalize_telegram_channel(source.external_id or source.url)
+        url = f"https://t.me/s/{channel}"
         # Telegram public pages may be blocked by geography/network policy. In
         # auto mode, 403/451 are useful signals to try the next available route.
         retry = {403, 451} if source.network_policy == "auto" else set()
         response = self._get(url, route=source.network_policy, retry_statuses=retry)
         soup = BeautifulSoup(response.text, "html.parser")
+        messages = soup.select(".tgme_widget_message[data-post]")
+        if not soup.select_one(".tgme_channel_history") and not messages:
+            raise CollectorError(
+                f"Telegram public preview returned no channel history (route={source.network_policy}, "
+                f"status={response.status_code}, bytes={len(response.content)})"
+            )
         result: list[ItemPayload] = []
-        for wrapper in soup.select(".tgme_widget_message_wrap"):
-            message = wrapper.select_one(".tgme_widget_message")
-            if message is None:
-                continue
+        for message in messages:
             post_id = message.get("data-post")
-            text_node = wrapper.select_one(".tgme_widget_message_text")
-            text = " ".join(text_node.stripped_strings) if text_node else ""
+            if not post_id or "/" not in post_id:
+                continue
+            post_channel, message_id = post_id.rsplit("/", 1)
+            if not message_id.isdigit():
+                continue
+            wrapper = message.find_parent(class_="tgme_widget_message_wrap") or message.parent
+            text_node = wrapper.select_one(".tgme_widget_message_text") if wrapper else None
+            text = text_node.get_text("\n", strip=True) if text_node else ""
             if not text:
                 continue
             date_link = wrapper.select_one("a.tgme_widget_message_date")
-            item_url = date_link.get("href") if date_link else source.url
+            item_url = f"https://t.me/{post_channel}/{message_id}"
             time_node = wrapper.select_one("time")
             published_at = None
             if time_node and time_node.get("datetime"):
@@ -211,7 +236,7 @@ class TelegramPublicCollector(HttpCollectorBase):
                 match = re.search(r"background-image:url\(['\"]?([^'\")]+)", style)
                 if match:
                     image_url = match.group(1)
-            result.append(ItemPayload(external_id=post_id, url=item_url, title=None, text=text[:12000], published_at=published_at, author=channel, image_url=image_url, raw_payload={"collector": "telegram_public", "network_policy": source.network_policy}))
+            result.append(ItemPayload(external_id=f"telegram:{post_channel}:{message_id}", url=item_url, title=None, text=text[:12000], published_at=published_at, author=post_channel, image_url=image_url, raw_payload={"collector": "telegram_public", "network_policy": source.network_policy, "telegram_post_id": post_id, "telegram_channel": post_channel}))
             if len(result) >= self.policy.max_items:
                 break
         return result
