@@ -35,3 +35,28 @@ def test_temporary_source_can_be_deleted_from_registry(tmp_path: Path, monkeypat
             assert session.scalar(select(RegisteredSource).where(RegisteredSource.id == source_id)) is None
     finally:
         reset_db_runtime(); get_settings.cache_clear()
+
+
+def test_source_profile_can_be_opened_and_edited(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DP_DATABASE_URL", f"sqlite:///{tmp_path / 'registry.db'}")
+    env_file = tmp_path / ".env"; example_file = tmp_path / ".env.example"
+    monkeypatch.setattr(web_setup, "env_path", lambda: env_file); monkeypatch.setattr(web_setup, "env_example_path", lambda: example_file)
+    monkeypatch.setattr(shared_config, "env_path", lambda: env_file)
+    example_file.write_text("DP_TELEGRAM_BOT_TOKEN=\nDP_TELEGRAM_CHANNEL_ID=\nDP_TELEGRAM_ADMIN_IDS=\n", encoding="utf-8")
+    get_settings.cache_clear(); reset_db_runtime(); Base.metadata.create_all(get_engine())
+    try:
+        web_setup.save_telegram_setup(bot_token="123456789:AAabcdefghijklmnopqrstuvwxyz", bot_name="Test", channel_id="@test", admin_ids="123456789")
+        with create_session() as session:
+            source = create_source(session, name="Profile", platform="website", source_type="promo_page", url="https://example.test", collector_type="generic_web", item_selector=".card")
+            session.commit(); source_id = source.id
+        client = TestClient(app)
+        page = client.get(f"/sources-registry/{source_id}/edit")
+        assert page.status_code == 200 and 'value=".card"' in page.text
+        response = client.post(f"/sources-registry/{source_id}/edit", data={"name":"Profile edited","platform":"website","source_type":"promo_page","url":"https://example.test/deals","collector_type":"generic_web","trust_level":"official","priority":"60","check_interval_minutes":"90","item_selector":".deal","title_selector":".heading"}, follow_redirects=False)
+        assert response.status_code == 303
+        with create_session() as session:
+            saved = session.get(RegisteredSource, source_id)
+            assert saved and saved.name == "Profile edited" and saved.item_selector == ".deal" and saved.title_selector == ".heading"
+    finally:
+        reset_db_runtime(); get_settings.cache_clear()

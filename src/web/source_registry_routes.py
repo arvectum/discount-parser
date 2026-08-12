@@ -43,6 +43,27 @@ def _option(value: str, label: str | None = None) -> str:
     return f'<option value="{html.escape(value)}">{html.escape(label or value)}</option>'
 
 
+def _selected_options(values: tuple[str, ...], selected: str) -> str:
+    return ''.join(
+        f'<option value="{html.escape(value)}{" selected" if value == selected else ""}>{html.escape(value)}</option>'
+        for value in values
+    )
+
+
+def _source_form_fields(source: RegisteredSource) -> str:
+    fields = (
+        ('item_selector', 'Контейнер предложения'), ('title_selector', 'Название'),
+        ('promo_code_selector', 'Промокод'), ('promo_code_attribute', 'Атрибут промокода'),
+        ('conditions_selector', 'Условия'), ('valid_until_selector', 'Срок действия'),
+        ('link_selector', 'Ссылка'), ('reveal_selector', 'Элемент раскрытия'),
+        ('reveal_code_attribute', 'Атрибут раскрытия'),
+    )
+    return ''.join(
+        f'<div class="field"><label>{label}</label><input name="{name}" value="{html.escape(str(getattr(source, name) or ""))}"></div>'
+        for name, label in fields
+    )
+
+
 @router.get('/sources-registry', response_class=HTMLResponse)
 def registry_page(message: str | None = None, error: str | None = None):
     redirect = _require_setup()
@@ -60,7 +81,8 @@ def registry_page(message: str | None = None, error: str | None = None):
         action = 'disable' if source.enabled else 'enable'
         action_label = 'Выключить' if source.enabled else 'Включить'
         delete_action = '' if source.collector_type == 'legacy_adapter' else f'<form method="post" action="/sources-registry/{source.id}/delete"><button class="btn bad">Удалить</button></form>'
-        source_rows.append(f'''<tr><td><b>{html.escape(source.name)}</b><br><span class="muted">{html.escape(source.key)}</span></td><td>{html.escape(source.platform)}<br><span class="muted">{html.escape(source.source_type)}</span></td><td>{html.escape(source.merchant or '—')}</td><td><a target="_blank" rel="noopener" href="{html.escape(source.url)}">открыть</a><br><span class="muted">{html.escape(source.collector_type)}</span></td><td>{enabled}<br><span class="pill {status_cls}">{html.escape(source.status)}</span></td><td>{html.escape(str(source.last_success_at or '—'))}<br><span class="muted">{html.escape((source.last_error or '')[:160])}</span></td><td><div class="row"><form method="post" action="/sources-registry/{source.id}/{action}"><button class="btn secondary">{action_label}</button></form>{'' if source.collector_type == 'legacy_adapter' else f'<form method="post" action="/sources-registry/{source.id}/test"><button class="btn good">Проверить</button></form>'}{delete_action}</div></td></tr>''')
+        edit_action = '' if source.collector_type == 'legacy_adapter' else f'<a class="btn secondary" href="/sources-registry/{source.id}/edit">Редактировать</a>'
+        source_rows.append(f'''<tr><td><b>{html.escape(source.name)}</b><br><span class="muted">{html.escape(source.key)}</span></td><td>{html.escape(source.platform)}<br><span class="muted">{html.escape(source.source_type)}</span></td><td>{html.escape(source.merchant or '—')}</td><td><a target="_blank" rel="noopener" href="{html.escape(source.url)}">открыть</a><br><span class="muted">{html.escape(source.collector_type)}</span></td><td>{enabled}<br><span class="pill {status_cls}">{html.escape(source.status)}</span></td><td>{html.escape(str(source.last_success_at or '—'))}<br><span class="muted">{html.escape((source.last_error or '')[:160])}</span></td><td><div class="row">{edit_action}<form method="post" action="/sources-registry/{source.id}/{action}"><button class="btn secondary">{action_label}</button></form>{'' if source.collector_type == 'legacy_adapter' else f'<form method="post" action="/sources-registry/{source.id}/test"><button class="btn good">Проверить</button></form>'}{delete_action}</div></td></tr>''')
 
     candidate_rows = []
     for item in candidates:
@@ -102,6 +124,48 @@ def add_source_route(
     except Exception as exc:
         return RedirectResponse('/sources-registry?error=' + quote(f'{type(exc).__name__}: {exc}'), status_code=303)
     return RedirectResponse('/sources-registry?message=' + quote('Источник добавлен'), status_code=303)
+
+
+@router.get('/sources-registry/{source_id}/edit', response_class=HTMLResponse)
+def edit_source_page(source_id: int):
+    redirect = _require_setup()
+    if redirect:
+        return redirect
+    with create_session() as session:
+        source = session.get(RegisteredSource, source_id)
+        if source is None:
+            return HTMLResponse('Source not found', status_code=404)
+        if source.collector_type == 'legacy_adapter':
+            return RedirectResponse('/sources-registry?error=' + quote('Legacy source редактируется в config'), status_code=303)
+        body = f'''<div class="card"><h2>Редактировать источник</h2><form method="post" action="/sources-registry/{source.id}/edit"><div class="grid"><div class="field"><label>Название</label><input name="name" value="{html.escape(source.name)}" required></div><div class="field"><label>Платформа</label><select name="platform">{_selected_options(tuple(value for value in PLATFORMS if value != 'promo_aggregator'), source.platform)}</select></div><div class="field"><label>Тип</label><input name="source_type" value="{html.escape(source.source_type)}"></div><div class="field"><label>URL</label><input name="url" type="url" value="{html.escape(source.url)}" required></div><div class="field"><label>External ID / username</label><input name="external_id" value="{html.escape(source.external_id or '')}"></div><div class="field"><label>Магазин</label><input name="merchant" value="{html.escape(source.merchant or '')}"></div><div class="field"><label>Collector</label><select name="collector_type">{_selected_options(tuple(COLLECTORS), source.collector_type)}</select></div><div class="field"><label>Trust</label><select name="trust_level">{_selected_options(TRUST_LEVELS, source.trust_level)}</select></div><div class="field"><label>Priority 0–100</label><input name="priority" type="number" min="0" max="100" value="{source.priority}"></div><div class="field"><label>Интервал, минут</label><input name="check_interval_minutes" type="number" min="1" max="10080" value="{source.check_interval_minutes}"></div></div><h3 style="margin-top:18px">Точная настройка полей сайта</h3><div class="grid">{_source_form_fields(source)}</div><div class="row" style="margin-top:12px"><button class="btn good">Сохранить</button><a class="btn secondary" href="/sources-registry">Отмена</a></div></form></div>'''
+    return _layout('Редактировать источник', body)
+
+
+@router.post('/sources-registry/{source_id}/edit')
+def edit_source_route(
+    source_id: int, name: str = Form(...), platform: str = Form(...), source_type: str = Form('other'), url: str = Form(...),
+    external_id: str = Form(''), merchant: str = Form(''), collector_type: str = Form(...), trust_level: str = Form('unknown'),
+    priority: int = Form(50), check_interval_minutes: int = Form(120), item_selector: str = Form(''), title_selector: str = Form(''),
+    promo_code_selector: str = Form(''), promo_code_attribute: str = Form(''), conditions_selector: str = Form(''), valid_until_selector: str = Form(''),
+    link_selector: str = Form(''), reveal_selector: str = Form(''), reveal_code_attribute: str = Form(''),
+):
+    with session_scope() as session:
+        source = session.get(RegisteredSource, source_id)
+        if source is None:
+            return HTMLResponse('Source not found', status_code=404)
+        if source.collector_type == 'legacy_adapter':
+            return RedirectResponse('/sources-registry?error=' + quote('Legacy source редактируется в config'), status_code=303)
+        for field, value in {
+            'name': name, 'platform': platform, 'source_type': source_type, 'url': url, 'external_id': external_id or None,
+            'merchant': merchant or None, 'collector_type': collector_type, 'trust_level': trust_level, 'priority': priority,
+            'check_interval_minutes': check_interval_minutes, 'item_selector': item_selector or None, 'title_selector': title_selector or None,
+            'promo_code_selector': promo_code_selector or None, 'promo_code_attribute': promo_code_attribute or None,
+            'conditions_selector': conditions_selector or None, 'valid_until_selector': valid_until_selector or None,
+            'link_selector': link_selector or None, 'reveal_selector': reveal_selector or None,
+            'reveal_code_attribute': reveal_code_attribute or None,
+        }.items():
+            setattr(source, field, value)
+    return RedirectResponse('/sources-registry?message=' + quote('Источник обновлён'), status_code=303)
 
 
 @router.post('/sources-registry/{source_id}/{action}')
