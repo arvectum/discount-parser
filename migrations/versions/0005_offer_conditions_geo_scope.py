@@ -24,9 +24,18 @@ def upgrade() -> None:
     bind = op.get_bind()
     columns = _columns(bind, "offers")
     if columns:
+        has_geo_scope_check = any(
+            "geo_scope" in str(item.get("sqltext") or "")
+            for item in sa.inspect(bind).get_check_constraints("offers")
+        )
         with op.batch_alter_table("offers") as batch:
             if "geo_scope" not in columns:
                 batch.add_column(sa.Column("geo_scope", sa.String(length=32), nullable=False, server_default="unknown"))
+            if not has_geo_scope_check:
+                batch.create_check_constraint(
+                    "ck_offers_geo_scope",
+                    "geo_scope IN ('all_russia','region','city','unknown')",
+                )
             if "conditions" not in columns:
                 batch.add_column(sa.Column("conditions", sa.Text()))
             if "max_discount_amount" not in columns:
@@ -47,6 +56,14 @@ def downgrade() -> None:
         op.drop_index("ix_offers_geo_scope", table_name="offers")
     columns = _columns(bind, "offers")
     with op.batch_alter_table("offers") as batch:
+        check_constraints = {
+            item["name"]
+            for item in sa.inspect(bind).get_check_constraints("offers")
+            if item.get("name")
+            and "geo_scope" in str(item.get("sqltext") or "")
+        }
+        for name in check_constraints:
+            batch.drop_constraint(name, type_="check")
         for name in ("min_order_amount", "max_discount_amount", "conditions", "geo_scope"):
             if name in columns:
                 batch.drop_column(name)
