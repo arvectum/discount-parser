@@ -59,7 +59,8 @@ def registry_page(message: str | None = None, error: str | None = None):
         status_cls = 'on' if source.status == 'healthy' else ('off' if source.status in {'blocked','degraded'} else 'warn')
         action = 'disable' if source.enabled else 'enable'
         action_label = 'Выключить' if source.enabled else 'Включить'
-        source_rows.append(f'''<tr><td><b>{html.escape(source.name)}</b><br><span class="muted">{html.escape(source.key)}</span></td><td>{html.escape(source.platform)}<br><span class="muted">{html.escape(source.source_type)}</span></td><td>{html.escape(source.merchant or '—')}</td><td><a target="_blank" rel="noopener" href="{html.escape(source.url)}">открыть</a><br><span class="muted">{html.escape(source.collector_type)}</span></td><td>{enabled}<br><span class="pill {status_cls}">{html.escape(source.status)}</span></td><td>{html.escape(str(source.last_success_at or '—'))}<br><span class="muted">{html.escape((source.last_error or '')[:160])}</span></td><td><div class="row"><form method="post" action="/sources-registry/{source.id}/{action}"><button class="btn secondary">{action_label}</button></form>{'' if source.collector_type == 'legacy_adapter' else f'<form method="post" action="/sources-registry/{source.id}/test"><button class="btn good">Проверить</button></form>'}</div></td></tr>''')
+        delete_action = '' if source.collector_type == 'legacy_adapter' else f'<form method="post" action="/sources-registry/{source.id}/delete"><button class="btn bad">Удалить</button></form>'
+        source_rows.append(f'''<tr><td><b>{html.escape(source.name)}</b><br><span class="muted">{html.escape(source.key)}</span></td><td>{html.escape(source.platform)}<br><span class="muted">{html.escape(source.source_type)}</span></td><td>{html.escape(source.merchant or '—')}</td><td><a target="_blank" rel="noopener" href="{html.escape(source.url)}">открыть</a><br><span class="muted">{html.escape(source.collector_type)}</span></td><td>{enabled}<br><span class="pill {status_cls}">{html.escape(source.status)}</span></td><td>{html.escape(str(source.last_success_at or '—'))}<br><span class="muted">{html.escape((source.last_error or '')[:160])}</span></td><td><div class="row"><form method="post" action="/sources-registry/{source.id}/{action}"><button class="btn secondary">{action_label}</button></form>{'' if source.collector_type == 'legacy_adapter' else f'<form method="post" action="/sources-registry/{source.id}/test"><button class="btn good">Проверить</button></form>'}{delete_action}</div></td></tr>''')
 
     candidate_rows = []
     for item in candidates:
@@ -109,6 +110,15 @@ def source_action(source_id: int, action: str):
         with session_scope() as session:
             set_source_enabled(session, source_id, action == 'enable')
         return RedirectResponse('/sources-registry?message=' + quote('Состояние источника обновлено'), status_code=303)
+    if action == 'delete':
+        with session_scope() as session:
+            row = session.get(RegisteredSource, source_id)
+            if row is None:
+                return HTMLResponse('Source not found', status_code=404)
+            if row.collector_type == 'legacy_adapter':
+                return RedirectResponse('/sources-registry?error=' + quote('Legacy source нельзя удалить из registry'), status_code=303)
+            session.delete(row)
+        return RedirectResponse('/sources-registry?message=' + quote('Источник удалён'), status_code=303)
     if action == 'test':
         try:
             result = collect_registered_source(source_id)
