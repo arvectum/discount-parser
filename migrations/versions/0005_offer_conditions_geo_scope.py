@@ -20,9 +20,21 @@ def _columns(bind, table_name: str) -> set[str]:
     return {column["name"] for column in inspector.get_columns(table_name)}
 
 
+def _check_constraints(bind, table_name: str) -> set[str]:
+    inspector = sa.inspect(bind)
+    if table_name not in inspector.get_table_names():
+        return set()
+    return {
+        str(item["name"])
+        for item in inspector.get_check_constraints(table_name)
+        if item.get("name")
+    }
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     columns = _columns(bind, "offers")
+    checks = _check_constraints(bind, "offers")
     if columns:
         has_geo_scope_check = any(
             "geo_scope" in str(item.get("sqltext") or "")
@@ -47,23 +59,31 @@ def upgrade() -> None:
             op.create_index("ix_offers_geo_scope", "offers", ["geo_scope"])
 
 
+
+
 def downgrade() -> None:
     bind = op.get_bind()
-    if "offers" not in sa.inspect(bind).get_table_names():
-        return
-    indexes = {idx["name"] for idx in sa.inspect(bind).get_indexes("offers")}
+    inspector = sa.inspect(bind)
+    
+    # Drop index first
+    indexes = {idx["name"] for idx in inspector.get_indexes("offers")}
     if "ix_offers_geo_scope" in indexes:
         op.drop_index("ix_offers_geo_scope", table_name="offers")
+    
     columns = _columns(bind, "offers")
-    with op.batch_alter_table("offers") as batch:
-        check_constraints = {
-            item["name"]
-            for item in sa.inspect(bind).get_check_constraints("offers")
-            if item.get("name")
-            and "geo_scope" in str(item.get("sqltext") or "")
-        }
-        for name in check_constraints:
-            batch.drop_constraint(name, type_="check")
+    
+    # To fix SQLite "no such column: geo_scope" during table recreation:
+    # We must ensure Alembic doesn't try to recreate the CHECK constraint 
+    # that refers to geo_scope in the new table.
+    
+    with op.batch_alter_table("offers", naming_convention={
+        "check": "ck_%(table_name)s_%(constraint_name)s",
+    }) as batch:
+        # Explicitly drop the constraint by name. 
+        # Alembic's batch mode will then omit it from the CREATE TABLE of the temp table.
+        batch.drop_constraint("ck_offers_geo_scope", type_="check")
+        
         for name in ("min_order_amount", "max_discount_amount", "conditions", "geo_scope"):
             if name in columns:
                 batch.drop_column(name)
+

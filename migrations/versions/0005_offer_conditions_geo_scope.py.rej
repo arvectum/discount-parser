@@ -1,0 +1,38 @@
+diff a/migrations/versions/0005_offer_conditions_geo_scope.py b/migrations/versions/0005_offer_conditions_geo_scope.py	(rejected hunks)
+@@ -20,10 +20,22 @@
+     return {column["name"] for column in inspector.get_columns(table_name)}
+ 
+ 
++def _check_constraints(bind, table_name: str) -> set[str]:
++    inspector = sa.inspect(bind)
++    if table_name not in inspector.get_table_names():
++        return set()
++    return {
++        str(item["name"])
++        for item in inspector.get_check_constraints(table_name)
++        if item.get("name")
++    }
++
++
+ def upgrade() -> None:
+     bind = op.get_bind()
+     columns = _columns(bind, "offers")
+     if columns:
++        checks = _check_constraints(bind, "offers")
+         with op.batch_alter_table("offers") as batch:
+             if "geo_scope" not in columns:
+                 batch.add_column(sa.Column("geo_scope", sa.String(length=32), nullable=False, server_default="unknown"))
+@@ -46,7 +68,13 @@
+     if "ix_offers_geo_scope" in indexes:
+         op.drop_index("ix_offers_geo_scope", table_name="offers")
+     columns = _columns(bind, "offers")
++    checks = _check_constraints(bind, "offers")
+     with op.batch_alter_table("offers") as batch:
++        # Drop the constraint before geo_scope. Otherwise Alembic/SQLite keeps
++        # the reflected CHECK while rebuilding the temporary table and SQLite
++        # fails with "no such column: geo_scope".
++        if "ck_offers_geo_scope" in checks:
++            batch.drop_constraint("ck_offers_geo_scope", type_="check")
+         for name in ("min_order_amount", "max_discount_amount", "conditions", "geo_scope"):
+             if name in columns:
+                 batch.drop_column(name)

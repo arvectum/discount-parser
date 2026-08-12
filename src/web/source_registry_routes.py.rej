@@ -1,0 +1,137 @@
+diff a/src/web/source_registry_routes.py b/src/web/source_registry_routes.py	(rejected hunks)
+@@ -59,7 +59,7 @@
+         status_cls = 'on' if source.status == 'healthy' else ('off' if source.status in {'blocked','degraded'} else 'warn')
+         action = 'disable' if source.enabled else 'enable'
+         action_label = 'Выключить' if source.enabled else 'Включить'
+-        source_rows.append(f'''<tr><td><b>{html.escape(source.name)}</b><br><span class="muted">{html.escape(source.key)}</span></td><td>{html.escape(source.platform)}<br><span class="muted">{html.escape(source.source_type)}</span></td><td>{html.escape(source.merchant or '—')}</td><td><a target="_blank" rel="noopener" href="{html.escape(source.url)}">открыть</a><br><span class="muted">{html.escape(source.collector_type)}</span></td><td>{enabled}<br><span class="pill {status_cls}">{html.escape(source.status)}</span></td><td>{html.escape(str(source.last_success_at or '—'))}<br><span class="muted">{html.escape((source.last_error or '')[:160])}</span></td><td><div class="row"><form method="post" action="/sources-registry/{source.id}/{action}"><button class="btn secondary">{action_label}</button></form>{'' if source.collector_type == 'legacy_adapter' else f'<form method="post" action="/sources-registry/{source.id}/test"><button class="btn good">Проверить</button></form>'}</div></td></tr>''')
++        source_rows.append(f'''<tr><td><b>{html.escape(source.name)}</b><br><span class="muted">{html.escape(source.key)}</span></td><td>{html.escape(source.platform)}<br><span class="muted">{html.escape(source.source_type)}</span></td><td>{html.escape(source.merchant or '—')}</td><td><a target="_blank" rel="noopener" href="{html.escape(source.url)}">открыть</a><br><span class="muted">{html.escape(source.collector_type)}</span></td><td>{enabled}<br><span class="pill {status_cls}">{html.escape(source.status)}</span></td><td>{html.escape(str(source.last_success_at or '—'))}<br><span class="muted">{html.escape((source.last_error or '')[:160])}</span></td><td><div class="row"><form method="post" action="/sources-registry/{source.id}/{action}"><button class="btn secondary">{action_label}</button></form><a class="btn secondary" href="/sources-registry/{source.id}/edit">Настроить поля</a>{'' if source.collector_type == 'legacy_adapter' else f'<form method="post" action="/sources-registry/{source.id}/test"><button class="btn good">Проверить</button></form>'}</div></td></tr>''')
+ 
+     candidate_rows = []
+     for item in candidates:
+@@ -103,6 +103,126 @@
+     return RedirectResponse('/sources-registry?message=' + quote('Источник добавлен'), status_code=303)
+ 
+ 
++
++def _selected(value: str, current: str) -> str:
++    return ' selected' if value == current else ''
++
++
++def _source_edit_form(source: RegisteredSource) -> str:
++    platform_options = ''.join(
++        f'<option value="{html.escape(value)}"{_selected(value, source.platform)}>{html.escape(value)}</option>'
++        for value in PLATFORMS
++    )
++    collector_values = list(COLLECTORS)
++    if source.collector_type not in collector_values:
++        collector_values.insert(0, source.collector_type)
++    collector_options = ''.join(
++        f'<option value="{html.escape(value)}"{_selected(value, source.collector_type)}>{html.escape(value)}</option>'
++        for value in collector_values
++    )
++    trust_options = ''.join(
++        f'<option value="{html.escape(value)}"{_selected(value, source.trust_level)}>{html.escape(value)}</option>'
++        for value in TRUST_LEVELS
++    )
++
++    def value(name: str) -> str:
++        return html.escape(str(getattr(source, name) or ''), quote=True)
++
++    selector_fields = [
++        ('item_selector', 'Контейнер предложения', '.coupon-card'),
++        ('title_selector', 'Название', '.coupon-title'),
++        ('promo_code_selector', 'Промокод', '[data-c-text]'),
++        ('promo_code_attribute', 'Атрибут промокода', 'data-code'),
++        ('conditions_selector', 'Условия', '.conditions'),
++        ('valid_until_selector', 'Срок действия', 'time, .valid-until'),
++        ('link_selector', 'Ссылка', 'a.offer-link'),
++        ('reveal_selector', 'Элемент раскрытия', '[data-coupon-id]'),
++        ('reveal_code_attribute', 'Атрибут раскрытия', 'data-coupon-id'),
++    ]
++    mapping = ''.join(
++        f'<div class="field"><label>{html.escape(label)}</label>'
++        f'<input name="{name}" value="{value(name)}" placeholder="{html.escape(placeholder, quote=True)}"></div>'
++        for name, label, placeholder in selector_fields
++    )
++    return f'''
++    <div class="card">
++      <h2>Источник: {html.escape(source.name)}</h2>
++      <div class="muted">Настройте источник и соответствие элементов страницы полям предложения. Для сайтов используется CSS-селектор: например <code>.coupon-card</code> или <code>[data-c-text]</code>. Пустое поле отключает соответствующее правило. Если это старый legacy-источник, сохранение хотя бы одного селектора автоматически переключит его на точный <code>generic_web</code> маппинг вместо старого адаптера.</div>
++      <form method="post" action="/sources-registry/{source.id}/edit" style="margin-top:16px">
++        <div class="grid">
++          <div class="field"><label>Название источника</label><input name="name" value="{value('name')}" required></div>
++          <div class="field"><label>Платформа</label><select name="platform">{platform_options}</select></div>
++          <div class="field"><label>Тип</label><input name="source_type" value="{value('source_type')}"></div>
++          <div class="field"><label>URL</label><input name="url" type="url" value="{value('url')}" required></div>
++          <div class="field"><label>External ID / username</label><input name="external_id" value="{value('external_id')}"></div>
++          <div class="field"><label>Магазин</label><input name="merchant" value="{value('merchant')}"></div>
++          <div class="field"><label>Collector</label><select name="collector_type">{collector_options}</select></div>
++          <div class="field"><label>Trust</label><select name="trust_level">{trust_options}</select></div>
++          <div class="field"><label>Priority 0–100</label><input name="priority" type="number" min="0" max="100" value="{source.priority}"></div>
++          <div class="field"><label>Интервал, минут</label><input name="check_interval_minutes" type="number" min="1" max="10080" value="{source.check_interval_minutes}"></div>
++        </div>
++        <h3 style="margin-top:18px">Маппинг полей сайта</h3>
++        <div class="muted" style="margin-bottom:10px">Сначала задайте контейнер одного предложения, затем селекторы внутри него. «Атрибут промокода» нужен, если код хранится не в тексте элемента, а в HTML-атрибуте.</div>
++        <div class="grid">{mapping}</div>
++        <div class="row" style="margin-top:16px">
++          <button class="btn good">Сохранить настройки</button>
++          <a class="btn secondary" href="/sources-registry">Отмена</a>
++        </div>
++      </form>
++    </div>'''
++
++
++@router.get('/sources-registry/{source_id}/edit', response_class=HTMLResponse)
++def source_edit_page(source_id: int, error: str | None = None):
++    redirect = _require_setup()
++    if redirect:
++        return redirect
++    with create_session() as session:
++        source = session.get(RegisteredSource, source_id)
++        if source is None:
++            return HTMLResponse('Source not found', status_code=404)
++        session.expunge(source)
++    err = f'<div class="err">{html.escape(error)}</div>' if error else ''
++    return _layout('Настройка источника', err + _source_edit_form(source))
++
++
++@router.post('/sources-registry/{source_id}/edit')
++def source_edit_save(
++    source_id: int,
++    name: str = Form(...), platform: str = Form(...), source_type: str = Form('other'), url: str = Form(...),
++    external_id: str = Form(''), merchant: str = Form(''), collector_type: str = Form(...),
++    trust_level: str = Form('unknown'), priority: int = Form(50), check_interval_minutes: int = Form(120),
++    item_selector: str = Form(''), title_selector: str = Form(''), promo_code_selector: str = Form(''),
++    promo_code_attribute: str = Form(''), conditions_selector: str = Form(''),
++    valid_until_selector: str = Form(''), link_selector: str = Form(''), reveal_selector: str = Form(''),
++    reveal_code_attribute: str = Form(''),
++):
++    selector_values = (
++        item_selector, title_selector, promo_code_selector, promo_code_attribute, conditions_selector,
++        valid_until_selector, link_selector, reveal_selector, reveal_code_attribute,
++    )
++    if collector_type == "legacy_adapter" and any(value.strip() for value in selector_values):
++        collector_type = "generic_web"
++    try:
++        with session_scope() as session:
++            update_source(
++                session, source_id, name=name, platform=platform, source_type=source_type, url=url,
++                external_id=external_id or None, merchant=merchant or None, collector_type=collector_type,
++                trust_level=trust_level, priority=priority, check_interval_minutes=check_interval_minutes,
++                item_selector=item_selector or None, title_selector=title_selector or None,
++                promo_code_selector=promo_code_selector or None, promo_code_attribute=promo_code_attribute or None,
++                conditions_selector=conditions_selector or None, valid_until_selector=valid_until_selector or None,
++                link_selector=link_selector or None, reveal_selector=reveal_selector or None,
++                reveal_code_attribute=reveal_code_attribute or None,
++            )
++    except Exception as exc:
++        return RedirectResponse(
++            f'/sources-registry/{source_id}/edit?error=' + quote(f'{type(exc).__name__}: {exc}'),
++            status_code=303,
++        )
++    return RedirectResponse('/sources-registry?message=' + quote('Настройки источника сохранены'), status_code=303)
++
++
+ @router.post('/sources-registry/{source_id}/{action}')
+ def source_action(source_id: int, action: str):
+     if action in {'enable', 'disable'}:
