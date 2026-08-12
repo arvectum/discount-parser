@@ -80,8 +80,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "registry-seed":
         with session_scope() as session:
-            result = seed_registry(session, settings.sources_config_path)
-        print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
+            result = seed_registry(session, sources_config_path=settings.sources_config_path)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "registry-collect":
