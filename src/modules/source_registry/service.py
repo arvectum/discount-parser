@@ -123,6 +123,36 @@ def set_source_enabled(session: Session, source_id: int, enabled: bool) -> Regis
     return source
 
 
+def update_source(session: Session, source_id: int, **values) -> RegisteredSource:
+    """Update a managed source without bypassing registry ownership rules."""
+    source = session.get(RegisteredSource, source_id)
+    if source is None:
+        raise KeyError(source_id)
+    editable = {
+        'name', 'platform', 'source_type', 'url', 'external_id', 'merchant',
+        'collector_type', 'trust_level', 'priority', 'check_interval_minutes',
+        'item_selector', 'title_selector', 'promo_code_selector',
+        'promo_code_attribute', 'conditions_selector', 'valid_until_selector',
+        'link_selector', 'reveal_selector', 'reveal_code_attribute',
+    }
+    unknown = set(values) - editable
+    if unknown:
+        raise ValueError('Unsupported source fields: ' + ', '.join(sorted(unknown)))
+    if values.get('platform', source.platform) not in PLATFORMS:
+        raise ValueError('Unsupported platform')
+    if values.get('trust_level', source.trust_level) not in TRUST_LEVELS:
+        raise ValueError('Unsupported trust level')
+    priority = int(values.get('priority', source.priority))
+    interval = int(values.get('check_interval_minutes', source.check_interval_minutes))
+    if not 0 <= priority <= 100 or not 1 <= interval <= 10080:
+        raise ValueError('Invalid source priority or interval')
+    for field, value in values.items():
+        setattr(source, field, value.strip() if isinstance(value, str) and field not in {'url'} else value)
+    source.updated_at = _now()
+    session.flush()
+    return source
+
+
 def add_keyword(
     session: Session,
     keyword: str,

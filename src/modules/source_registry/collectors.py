@@ -58,7 +58,7 @@ class SourceCollector(Protocol):
 @dataclass(frozen=True, slots=True)
 class HttpPolicy:
     timeout_seconds: float = 20.0
-    max_items: int = 100
+    max_items: int = 500
     max_response_bytes: int = 5_000_000
     user_agent: str = "DiscountParser/1.0 (+local source monitor)"
 

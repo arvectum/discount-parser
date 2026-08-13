@@ -58,6 +58,19 @@ def test_generic_web_collector_extracts_semantic_offer(monkeypatch: pytest.Monke
     assert items[0].image_url == "https://shop.test/img/sale.jpg"
 
 
+def test_generic_web_collector_handles_more_than_150_profiled_cards(monkeypatch: pytest.MonkeyPatch) -> None:
+    collector = GenericWebCollector()
+    html = ''.join(
+        f'<article class="card"><h3>Скидка {index}%</h3><p>Промокод QA{index:03d}</p></article>'
+        for index in range(180)
+    )
+    source = _source(platform="website", url="https://shop.test/qa", collector_type="generic_web")
+    source.item_selector = '.card'
+    source.title_selector = 'h3'
+    monkeypatch.setattr(collector, '_get', _stub_get(html))
+    assert len(collector.collect(source)) == 180
+
+
 def test_telegram_public_collector_extracts_post(monkeypatch: pytest.MonkeyPatch) -> None:
     collector = TelegramPublicCollector()
     html = """
