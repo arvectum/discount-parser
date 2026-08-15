@@ -50,6 +50,7 @@ def list_publish_candidates(
         ~exists().where(
             Publication.offer_id == Offer.id,
             Publication.channel_id == channel_id,
+            Publication.status.in_(["pending", "published"]),
         ),
     )
 

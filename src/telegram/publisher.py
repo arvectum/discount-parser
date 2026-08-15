@@ -38,9 +38,16 @@ def _reserve_publication(offer_id: int, channel_id: str) -> tuple[Offer | None, 
         existing = (
             session.query(Publication)
             .filter(Publication.offer_id == offer_id, Publication.channel_id == channel_id)
+            .with_for_update()
             .one_or_none()
         )
         if existing is not None:
+            if existing.status == "failed":
+                existing.status = "pending"
+                existing.error = None
+                session.commit()
+                # Return the refreshed record so the caller can proceed
+                return offer, existing, None
             return offer, existing, "already_reserved"
 
         if offer.status != "ready":
