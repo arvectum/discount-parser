@@ -110,3 +110,29 @@ def test_initial_alembic_migration_creates_expected_tables(tmp_path: Path, monke
 
     reset_db_runtime()
     get_settings.cache_clear()
+
+
+def test_sqlite_0005_geo_scope_downgrade_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_path = tmp_path / "migration-0005.db"
+    monkeypatch.setenv("DP_DATABASE_URL", f"sqlite:///{db_path}")
+    get_settings.cache_clear()
+    reset_db_runtime()
+    try:
+        config = Config("alembic.ini")
+        command.upgrade(config, "0004")
+        command.upgrade(config, "0005")
+        engine = get_engine()
+        assert "geo_scope" in {column["name"] for column in inspect(engine).get_columns("offers")}
+        assert any("geo_scope" in str(item.get("sqltext") or "") for item in inspect(engine).get_check_constraints("offers"))
+
+        command.downgrade(config, "0004")
+        assert "geo_scope" not in {column["name"] for column in inspect(engine).get_columns("offers")}
+        assert not any("geo_scope" in str(item.get("sqltext") or "") for item in inspect(engine).get_check_constraints("offers"))
+        assert "offers" in inspect(engine).get_table_names()
+
+        command.upgrade(config, "0005")
+        assert "geo_scope" in {column["name"] for column in inspect(engine).get_columns("offers")}
+        assert any("geo_scope" in str(item.get("sqltext") or "") for item in inspect(engine).get_check_constraints("offers"))
+    finally:
+        reset_db_runtime()
+        get_settings.cache_clear()

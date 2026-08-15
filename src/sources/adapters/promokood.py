@@ -9,12 +9,14 @@ from bs4 import BeautifulSoup, Tag
 
 from src.sources.base import RawOffer
 from src.sources.http import HttpClient
+from src.core.validity import extract_valid_until
 
 _PERCENT_RE = re.compile(r"(?:скидк\w*\s*)?(?:до\s*)?(\d{1,3})\s*%", re.IGNORECASE)
 _AMOUNT_RE = re.compile(r"(\d[\d\s]{0,8})\s*(?:₽|руб(?:\.|лей)?)", re.IGNORECASE)
 _OFFER_WORD_RE = re.compile(r"скидк|промокод|кэшб|кешб|бонус|бесплатно", re.IGNORECASE)
 _BENEFIT_START_RE = re.compile(r"\b(?:доп\.?\s*)?(?:скидк\w*|бонус|кэшб\w*|кешб\w*|бесплатно)\b", re.IGNORECASE)
 _ACTION_SUFFIX_RE = re.compile(r"\s+(?:активировать|получить|применить|использовать)\s+промокод.*$", re.IGNORECASE)
+_CODE_RE = re.compile(r"(?:промокод|код)\s*[:\-–—]?\s*([A-ZА-ЯЁ0-9][A-ZА-ЯЁ0-9_-]{3,24})", re.IGNORECASE)
 
 
 class PromokoodAdapter:
@@ -45,7 +47,9 @@ class PromokoodAdapter:
             source_url = urljoin(self.base_url, href) if href else self.base_url
             merchant = self._merchant(card, action_text)
             title = self._title(card_text, merchant)
-            external_id = hashlib.sha256(f"{source_url}|{merchant}|{title}".encode("utf-8")).hexdigest()[:32]
+            code_match = _CODE_RE.search(card_text)
+            promo_code = code_match.group(1) if code_match else None
+            external_id = hashlib.sha256(f"{source_url}|{merchant}|{title}|{promo_code or ''}".encode("utf-8")).hexdigest()[:32]
             if external_id in seen:
                 continue
             seen.add(external_id)
@@ -62,10 +66,13 @@ class PromokoodAdapter:
                     source_url=source_url,
                     merchant=merchant,
                     description=card_text[:2000],
+                    conditions=card_text[:2000],
+                    promo_code=promo_code,
                     discount_percent=discount_percent,
                     discount_amount=discount_amount,
                     image_url=image_url,
-                    raw_payload={"text": card_text},
+                    valid_until=extract_valid_until(card_text),
+                    raw_payload={"text": card_text, "promo_code": promo_code},
                 )
             )
         return offers
