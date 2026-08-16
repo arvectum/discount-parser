@@ -1,14 +1,19 @@
-from __future__ import annotations
-
+import logging
+import os
+import shutil
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from src.shared.config import get_settings
+from src.shared.runtime_paths import runtime_root
 
+logger = logging.getLogger(__name__)
 
 class Base(DeclarativeBase):
     pass
@@ -80,3 +85,91 @@ def reset_db_runtime() -> None:
         _engine.dispose()
     _engine = None
     _session_factory = None
+
+
+def check_and_recover_db() -> bool:
+    """Check SQLite integrity and perform automatic recovery if malformed.
+
+    Returns True if a recovery was performed, False otherwise.
+    """
+    from src.shared.config import get_settings
+    settings = get_settings()
+    if not settings.database_url.startswith("sqlite:///"):
+        return False
+
+    db_path = Path(settings.database_url.removeprefix("sqlite:///")).resolve()
+    if not db_path.exists():
+        return False
+
+    # 1. Quick integrity check
+    is_malformed = False
+    try:
+        from src.shared.config import get_settings
+        settings = get_settings()
+        engine = create_engine(settings.database_url)
+        try:
+            with engine.connect() as conn:
+                # Quick check first
+                result = conn.execute(text("PRAGMA quick_check")).scalar()
+                if result != "ok":
+                    is_malformed = True
+                else:
+                    # Malformed file might still pass quick_check if it's not a sqlite file
+                    # Try a real query
+                    try:
+                        conn.execute(text("SELECT name FROM sqlite_master LIMIT 1"))
+                    except Exception:
+                        is_malformed = True
+        finally:
+            engine.dispose()
+    except Exception:
+        is_malformed = True
+
+    if not is_malformed:
+        return False
+
+    logger.error(f"Database {db_path} is malformed. Starting recovery...")
+
+    # 2. Dispose existing runtime engine
+    reset_db_runtime()
+
+    # 3. Backup malformed files
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = db_path.with_suffix(f".corrupt_{timestamp}")
+    
+    # We must ensure no engine is holding the file.
+    reset_db_runtime()
+
+    for suffix in ["", "-wal", "-shm"]:
+        file = db_path.with_name(db_path.name + suffix)
+        if file.exists():
+            try:
+                shutil.move(str(file), str(backup_path.with_name(backup_path.name + suffix)))
+            except Exception as exc:
+                logger.error(f"Failed to backup {file}: {exc}")
+                try:
+                    file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+    
+    # Ensure fresh state for SQLAlchemy
+    reset_db_runtime()
+
+    # 4. Re-initialize
+    from alembic import command
+    from alembic.config import Config
+    from src.modules.source_registry.seed import seed_registry
+
+    try:
+        # Distribution entry uses alembic.ini from CWD
+        alembic_cfg = Config("alembic.ini")
+        command.upgrade(alembic_cfg, "head")
+        
+        with session_scope() as session:
+            seed_registry(session, sources_config_path=settings.sources_config_path)
+        
+        logger.info("Database recovered successfully.")
+        return True
+    except Exception as exc:
+        logger.critical(f"Database recovery failed: {exc}")
+        return False

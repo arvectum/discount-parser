@@ -17,8 +17,9 @@ _STANDARD_LOG_KEYS = {
 }
 
 _SECRET_PATTERNS = [
-    re.compile(r"(?i)(bot[_-]?token|api[_-]?hash|password|access[_-]?token|secret|authorization)\s*[:=]\s*['\"]?([^'\"\s&]+)"),
+    re.compile(r"(?i)(bot[_-]?token|api[_-]?hash|password|access[_-]?token|secret|authorization|vk[_-]?access[_-]?token)\s*[:=]\s*['\"]?([^'\"\s&]+)"),
     re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b"),  # Telegram Bot token pattern
+    re.compile(r"/bot\d{8,10}:[A-Za-z0-9_-]{35}/"),  # Telegram Bot API URL pattern
 ]
 
 

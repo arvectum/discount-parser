@@ -16,6 +16,10 @@ def runtime_root() -> Path:
     if override:
         return Path(override).expanduser().resolve()
     if getattr(sys, "frozen", False):
+        # We want to keep mutable state (db, .env, logs) separate from 
+        # the read-only executable directory to avoid upgrade/locking issues.
+        # However, for now we keep it in {localappdata}\DiscountParser
+        # which is also the default installation directory.
         return Path(sys.executable).resolve().parent
     return Path.cwd().resolve()
 

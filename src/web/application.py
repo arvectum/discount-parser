@@ -75,13 +75,30 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
             tb = traceback.format_exc()
             clean_tb = redact_secrets(tb)
             logger.error(f"web {request.method} {request.url.path} - 500 Internal Server Error\n{clean_tb}")
+
+            from src.shared.db import check_and_recover_db
+            recovery_happened = False
+            if "malformed" in tb.lower() or "database disk image is malformed" in tb.lower():
+                try:
+                    recovery_happened = check_and_recover_db()
+                except Exception as rec_exc:
+                    logger.error(f"Automatic recovery attempt failed: {rec_exc}")
+
+            error_title = "База данных ��осстановлена" if recovery_happened else "Произошла ошибка при обработке запроса"
+            error_msg = (
+                "Обнаружено повреждение базы данных. Она была автоматически сброшена, настройки Telegram сохранены. "
+                "Пожалуйста, запустите сбор предложений заново."
+                if recovery_happened else
+                "Детали ошибки сохранены в <code>app.log</code>."
+            )
+
             error_html = (
                 "<!doctype html><html lang='ru'><head><meta charset='utf-8'>"
-                "<title>Ошибка сервера</title><style>body{font-family:sans-serif;padding:30px;background:#f8fafc;color:#1e293b}"
-                ".card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;max-width:600px;margin:auto}"
-                "h1{color:#e11d48;font-size:20px}a{color:#0284c7}</style></head><body>"
-                "<div class='card'><h1>Произошла ошибка при обработке запроса</h1>"
-                "<p>Детали ошибки сохранены в <code>app.log</code>.</p>"
+                f"<title>{error_title}</title><style>body{{font-family:sans-serif;padding:30px;background:#f8fafc;color:#1e293b}}"
+                ".card{{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;max-width:600px;margin:auto}}"
+                "h1{{color:#e11d48;font-size:20px}}a{{color:#0284c7}}</style></head><body>"
+                f"<div class='card'><h1>{error_title}</h1>"
+                f"<p>{error_msg}</p>"
                 "<p><a href='/home'>Вернуться на главную</a></p></div></body></html>"
             )
             return HTMLResponse(content=error_html, status_code=500)
