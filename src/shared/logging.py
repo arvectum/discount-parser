@@ -18,9 +18,9 @@ _STANDARD_LOG_KEYS = {
 
 _SECRET_PATTERNS = [
     re.compile(r"(?i)(bot[_-]?token|api[_-]?hash|password|access[_-]?token|secret|authorization|vk[_-]?access[_-]?token)\s*[:=]\s*['\"]?([^'\"\s&]+)"),
-    re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b"),  # Telegram Bot token pattern
-    re.compile(r"(?i)bot\d{7,12}:[A-Za-z0-9_-]{30,50}"),  # Token in URL (more flexible)
+    re.compile(r"\d{7,12}:[A-Za-z0-9_-]{34,40}"),  # Telegram Bot token pattern (more robust)
 ]
+
 
 
 def redact_secrets(text: str) -> str:
