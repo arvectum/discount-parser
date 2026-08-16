@@ -19,7 +19,7 @@ _STANDARD_LOG_KEYS = {
 _SECRET_PATTERNS = [
     re.compile(r"(?i)(bot[_-]?token|api[_-]?hash|password|access[_-]?token|secret|authorization|vk[_-]?access[_-]?token)\s*[:=]\s*['\"]?([^'\"\s&]+)"),
     re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b"),  # Telegram Bot token pattern
-    re.compile(r"/bot\d{8,10}:[A-Za-z0-9_-]{35}/"),  # Telegram Bot API URL pattern
+    re.compile(r"(?i)bot\d{7,12}:[A-Za-z0-9_-]{30,50}"),  # Token in URL (more flexible)
 ]
 
 
@@ -78,7 +78,11 @@ def app_log_path() -> Path:
 
 def configure_logging(level: str = "INFO", log_format: str = "plain", *, component: str | None = None, enable_file: bool = True) -> None:
     root = logging.getLogger()
-    root.handlers.clear()
+    # Reset any existing handlers on the root logger to avoid duplication or interference
+    for h in root.handlers[:]:
+        root.removeHandler(h)
+        h.close()
+
     root.setLevel(level.upper())
 
     fmt_str = f"%(asctime)s [%(process)d] %(levelname)s [{component or '%(name)s'}]: %(message)s"
@@ -100,13 +104,13 @@ def configure_logging(level: str = "INFO", log_format: str = "plain", *, compone
                 maxBytes=5 * 1024 * 1024,  # 5 MB
                 backupCount=5,
                 encoding="utf-8",
+                delay=False,
             )
+            file_handler.setFormatter(StandardFormatter(fmt_str, datefmt=date_fmt))
             file_handler.addFilter(SecretFilter())
-            if log_format.lower() == "json":
-                file_handler.setFormatter(JsonFormatter())
-            else:
-                file_handler.setFormatter(StandardFormatter(fmt_str, datefmt=date_fmt))
             root.addHandler(file_handler)
+            # Ensure the file is not empty initially and writable
+            with open(file_path, "a", encoding="utf-8") as f:
+                f.write("")
         except Exception:
             pass
-

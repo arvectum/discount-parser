@@ -26,7 +26,7 @@ RestartApplications=yes
 Source: "..\..\delivery\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autodesktop}\Discount Parser"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Flags: nonexcludable
+Name: "{autodesktop}\Discount Parser"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
 Name: "{group}\Discount Parser"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
 
 [Code]

@@ -78,7 +78,8 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
 
             from src.shared.db import check_and_recover_db
             recovery_happened = False
-            if "malformed" in tb.lower() or "database disk image is malformed" in tb.lower():
+            tb_lower = tb.lower()
+            if "malformed" in tb_lower or "database disk image is malformed" in tb_lower or "file is not a database" in tb_lower:
                 try:
                     recovery_happened = check_and_recover_db()
                 except Exception as rec_exc:
@@ -95,8 +96,8 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
             error_html = (
                 "<!doctype html><html lang='ru'><head><meta charset='utf-8'>"
                 f"<title>{error_title}</title><style>body{{font-family:sans-serif;padding:30px;background:#f8fafc;color:#1e293b}}"
-                ".card{{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;max-width:600px;margin:auto}}"
-                "h1{{color:#e11d48;font-size:20px}}a{{color:#0284c7}}</style></head><body>"
+                ".card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;max-width:600px;margin:auto}"
+                "h1{color:#e11d48;font-size:20px}a{color:#0284c7}</style></head><body>"
                 f"<div class='card'><h1>{error_title}</h1>"
                 f"<p>{error_msg}</p>"
                 "<p><a href='/home'>Вернуться на главную</a></p></div></body></html>"

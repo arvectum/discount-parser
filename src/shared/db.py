@@ -82,7 +82,10 @@ def check_db_connection() -> bool:
 def reset_db_runtime() -> None:
     global _engine, _session_factory
     if _engine is not None:
-        _engine.dispose()
+        try:
+            _engine.dispose()
+        except Exception:
+            pass
     _engine = None
     _session_factory = None
 
@@ -103,54 +106,64 @@ def check_and_recover_db() -> bool:
 
     # 1. Quick integrity check
     is_malformed = False
+    temp_engine = create_engine(settings.database_url, connect_args={"timeout": 5})
     try:
-        from src.shared.config import get_settings
-        settings = get_settings()
-        engine = create_engine(settings.database_url)
-        try:
-            with engine.connect() as conn:
-                # Quick check first
-                result = conn.execute(text("PRAGMA quick_check")).scalar()
-                if result != "ok":
+        with temp_engine.connect() as conn:
+            # Quick check first
+            result = conn.execute(text("PRAGMA quick_check")).scalar()
+            if result != "ok":
+                is_malformed = True
+            else:
+                try:
+                    conn.execute(text("SELECT name FROM sqlite_master LIMIT 1"))
+                except Exception:
                     is_malformed = True
-                else:
-                    # Malformed file might still pass quick_check if it's not a sqlite file
-                    # Try a real query
-                    try:
-                        conn.execute(text("SELECT name FROM sqlite_master LIMIT 1"))
-                    except Exception:
-                        is_malformed = True
-        finally:
-            engine.dispose()
     except Exception:
         is_malformed = True
+    finally:
+        temp_engine.dispose()
 
     if not is_malformed:
         return False
 
     logger.error(f"Database {db_path} is malformed. Starting recovery...")
 
-    # 2. Dispose existing runtime engine
+    # 2. Dispose existing runtime engine AND wait a bit for file locks to release
     reset_db_runtime()
+    import time
+    time.sleep(0.5)
 
     # 3. Backup malformed files
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = db_path.with_suffix(f".corrupt_{timestamp}")
     
-    # We must ensure no engine is holding the file.
+    import gc
+    gc.collect()
     reset_db_runtime()
+    time.sleep(0.5)
 
-    for suffix in ["", "-wal", "-shm"]:
-        file = db_path.with_name(db_path.name + suffix)
-        if file.exists():
-            try:
-                shutil.move(str(file), str(backup_path.with_name(backup_path.name + suffix)))
-            except Exception as exc:
-                logger.error(f"Failed to backup {file}: {exc}")
+    for attempt in range(3):
+        success = True
+        for suffix in ["", "-wal", "-shm"]:
+            file = db_path.with_name(db_path.name + suffix)
+            if file.exists():
                 try:
-                    file.unlink(missing_ok=True)
-                except Exception:
-                    pass
+                    dest = backup_path.with_name(backup_path.name + suffix)
+                    # Try rename first, it's atomic and often works better on Windows
+                    try:
+                        os.rename(str(file), str(dest))
+                    except Exception:
+                        shutil.copy2(str(file), str(dest))
+                        file.unlink()
+                except Exception as exc:
+                    logger.warning(f"Attempt {attempt+1}: Failed to handle {file}: {exc}")
+                    success = False
+        if success:
+            break
+        time.sleep(1.0)
+    
+    if not success:
+        logger.error("Could not move malformed database files (locked). Attempting to overwrite directly...")
     
     # Ensure fresh state for SQLAlchemy
     reset_db_runtime()
