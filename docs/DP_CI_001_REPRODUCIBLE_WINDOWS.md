@@ -1,6 +1,6 @@
 # DP-CI-001 — Reproducible Windows installer build
 
-**Status:** IMPLEMENTED, CI acceptance pending on PR.
+**Status:** COMPLETE — accepted on canonical `main` on 2026-08-17.
 
 ## Goal
 
@@ -35,7 +35,7 @@ The Inno Setup `[Files]` entry uses `notimestamp`, so source file modification t
 
 ## Reproducibility gate
 
-`.github/workflows/windows-reproducibility.yml` launches two independent `windows-2025` jobs for every relevant pull request.
+`.github/workflows/windows-reproducibility.yml` launches two independent `windows-2025` jobs for every relevant pull request and repeats the same gate after relevant changes land on canonical `main`.
 
 Each replica:
 
@@ -60,13 +60,43 @@ The initial controlled budget is 64 MiB (67,108,864 bytes). The budget is intent
 
 This historical hash is a baseline only. DP-CI-001 does not require future installers to equal that historical installer; it requires two builds of the same current source to equal each other.
 
+## Acceptance evidence
+
+Implementation PR #11 passed:
+
+- repository CI across Linux, Windows, macOS ARM64, and macOS Intel;
+- normal three-platform `build-delivery`;
+- two independent Windows installer builds and byte comparison.
+
+The implementation was merged as canonical commit:
+
+`15ab7c06c1224edcc848b8960b153094b288ee73`
+
+The dedicated canonical-main reproducibility run was GitHub Actions run `32026733028`. Both independent Windows builds passed and the compare job reported:
+
+- SHA-256: `f543e79baf48758d820cff8f18439acdc3f3610ecb0b7932fd24aab2c778954d`;
+- size: `50,990,262` bytes;
+- provenance comparison: PASS;
+- size budget: PASS.
+
+The earlier final PR-head reproducibility run `32026400695` also passed before merge. The canonical-main hash differs from the PR merge-ref hash by design because `SOURCE_DATE_EPOCH` is bound to the exact source commit; within each exact source identity, both independent builds are bit-for-bit identical.
+
 ## Acceptance
 
-DP-CI-001 is complete only when all of the following are true on the implementation PR/main commit:
+| Requirement | State |
+|---|---|
+| Exact controlled Windows build manifest | PASS |
+| Exact Windows Python/dependency closure | PASS |
+| Exact PyInstaller/Inno toolchain identity | PASS |
+| Fixed deterministic build environment | PASS |
+| Smoke database excluded from package | PASS |
+| Installer size budget | PASS |
+| Independent build replica A | PASS |
+| Independent build replica B | PASS |
+| Actual Setup.exe SHA-256 equality | PASS |
+| Provenance equality | PASS |
+| Normal repository CI | PASS |
+| Normal three-platform delivery build | PASS |
+| Canonical `main` replay | PASS |
 
-- normal repository CI passes;
-- normal three-platform `build-delivery` passes;
-- both independent Windows reproducibility replicas pass;
-- the comparison job reports identical installer SHA-256 values;
-- the installer is within the versioned size budget;
-- regression tests for provenance/hash/budget behavior pass.
+**DP-CI-001: PASS / COMPLETE.**
