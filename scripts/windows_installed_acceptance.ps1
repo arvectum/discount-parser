@@ -68,8 +68,15 @@ try {
     }
 
     Write-Host "DP-CI-002 installing $InstallerPath -> $InstallDir"
-    & $InstallerPath "/VERYSILENT" "/SUPPRESSMSGBOXES" "/NORESTART" "/SP-" "/DIR=$InstallDir" "/LOG=$InstallerLog"
-    $InstallExit = $LASTEXITCODE
+    $InstallProcess = Start-Process -FilePath $InstallerPath -ArgumentList @(
+        "/VERYSILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",
+        "/SP-",
+        "/DIR=$InstallDir",
+        "/LOG=$InstallerLog"
+    ) -Wait -PassThru
+    $InstallExit = $InstallProcess.ExitCode
     $Evidence.install.exit_code = $InstallExit
     if ($InstallExit -ne 0) {
         throw "Installer failed with exit code $InstallExit"
@@ -181,8 +188,13 @@ try {
         throw "Inno Setup uninstaller was not found in installed directory"
     }
 
-    & $Uninstaller.FullName "/VERYSILENT" "/SUPPRESSMSGBOXES" "/NORESTART" "/LOG=$UninstallerLog"
-    $UninstallExit = $LASTEXITCODE
+    $UninstallProcess = Start-Process -FilePath $Uninstaller.FullName -ArgumentList @(
+        "/VERYSILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",
+        "/LOG=$UninstallerLog"
+    ) -Wait -PassThru
+    $UninstallExit = $UninstallProcess.ExitCode
     $Evidence.uninstall.exit_code = $UninstallExit
     if ($UninstallExit -ne 0) {
         throw "Uninstaller failed with exit code $UninstallExit"
