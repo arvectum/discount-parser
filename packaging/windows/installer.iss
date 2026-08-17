@@ -27,10 +27,9 @@ RestartApplications=no
 
 [InstallDelete]
 ; DP-WIN-001: the worker is product-owned and must never survive an upgrade as
-; a stale binary. Because [InstallDelete] participates in Restart Manager's
-; in-use detection, Setup closes a running worker first, deletes the old image,
-; and only then processes [Files]. A failure must be surfaced by Setup rather
-; than silently leaving an older worker behind.
+; a stale binary. Inno Setup includes [InstallDelete] files in CloseApplications
+; / Restart Manager in-use detection before deletion, so a running old worker is
+; closed first, the old image is deleted, and then [Files] installs the new one.
 Type: files; Name: "{app}\{#MyWorkerExeName}"
 
 [Files]
@@ -48,14 +47,6 @@ Name: "desktopicon"; Description: "Создать ярлык на рабочем
 Name: "{group}\Discount Parser"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
 
 [Code]
-procedure RegisterExtraCloseApplicationsResources();
-begin
-  // Explicitly register both product executables with Restart Manager. The worker
-  // is especially important because it can be a background process with no UI.
-  RegisterExtraCloseApplicationsResource(ExpandConstant('{app}\{#MyWorkerExeName}'));
-  RegisterExtraCloseApplicationsResource(ExpandConstant('{app}\{#MyAppExeName}'));
-end;
-
 function DesktopShortcutPath(): String;
 begin
   Result := ExpandConstant('{userdesktop}\{#MyDesktopShortcutName}');
