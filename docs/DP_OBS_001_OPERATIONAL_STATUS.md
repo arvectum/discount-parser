@@ -1,10 +1,12 @@
 # DP-OBS-001 — Unified operational status snapshot
 
-**Status:** IMPLEMENTED, CI acceptance pending.
+**Status:** COMPLETE — merged to canonical `main` on 2026-08-17.  
+**Canonical merge:** `f15a8252b97be63bf98ac5333f0e7cdd0b757805`  
+**Issue:** #18 — closed as completed.
 
 ## Goal
 
-Discount Parser now has one stable, secret-free operational snapshot instead of requiring support to mentally join `/system`, `/runs`, doctor output and database counters.
+Discount Parser has one stable, secret-free operational snapshot instead of requiring support to mentally join `/system`, `/runs`, doctor output and database counters.
 
 ## Interfaces
 
@@ -20,7 +22,7 @@ Local web panel after setup:
 GET /system/status.json
 ```
 
-The support bundle also includes the same model as `diagnostics/operational-status.json`.
+The support bundle includes the same model as `diagnostics/operational-status.json`.
 
 ## State model
 
@@ -42,15 +44,53 @@ The standalone `status-json` worker command does **not** pretend it can observe 
 
 The snapshot contains no `.env`, raw configuration secrets, Telegram credentials, proxy credentials, raw offers or publication message IDs. Source errors are passed through the normal secret redactor. Aggregate output uses an explicit field allowlist.
 
-## Acceptance
+## Reconciliation with current `main`
 
-DP-OBS-001 is complete when tests prove:
+The first DP-OBS-001 branch was based on an earlier canonical commit and became conflicted after the Windows installer hardening work. Before reconciliation, its original head was preserved at:
+
+```text
+backup/dp-obs-001-pre-reconcile-20260817
+```
+
+The active feature branch was then rebuilt from current canonical `main` and only the seven DP-OBS-001 files/changes were reapplied. This avoided carrying stale-base formatting reversions or unrelated changes back into `main`.
+
+The reconciled feature head was:
+
+```text
+af2881b2315301cc332ed0e9a582f6f99bcc7fba
+```
+
+It was exactly ahead of `main` with no behind commits before merge.
+
+## Acceptance evidence
+
+All required pull-request gates passed on the reconciled head:
+
+- multi-platform repository CI — PASS;
+- `build-delivery` — PASS;
+- Windows reproducibility — PASS;
+- Windows installed acceptance — PASS;
+- the installed-acceptance run also retained the DP-WIN-P0.2 installer resilience gate — PASS.
+
+The accepted behavior is covered by tests for:
 
 - deterministic `ok` / `warning` / `error` classification;
 - stale and failed source reporting;
 - required doctor failure -> `error`;
-- secret values are absent from serialized snapshots;
-- worker `status-json` emits valid JSON;
-- `/system/status.json` returns JSON only after setup and returns a safe 409 warning before setup;
-- support bundle includes the same operational snapshot;
-- repository CI, delivery, installed acceptance and Windows reproducibility remain green.
+- removal/redaction of secret values from serialized snapshots;
+- worker `status-json` valid JSON output;
+- `/system/status.json` normal response and safe pre-setup HTTP 409;
+- support bundle inclusion of the same operational snapshot;
+- continued compatibility with controlled Windows build/install/reproducibility gates.
+
+PR #19 was merged to canonical `main` as:
+
+```text
+f15a8252b97be63bf98ac5333f0e7cdd0b757805
+```
+
+Issue #18 closed automatically through the PR completion link.
+
+## Definition of done
+
+All DP-OBS-001 criteria are satisfied. Any future additions to the status schema must preserve the secret-free boundary and must not add raw offer/publication identifiers or configuration credential values without a deliberate schema/privacy review.
