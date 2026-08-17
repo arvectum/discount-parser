@@ -30,6 +30,19 @@ _SECRET_FIELD_MARKERS = (
     'token', 'password', 'secret', 'api_id', 'api_hash', 'session',
     'channel_id', 'admin_ids', 'proxy_url', 'proxy_username', 'access_token',
 )
+_INTEGER_RANGES = {
+    'collect_interval_minutes': (1, 10080),
+    'autopost_interval_minutes': (1, 10080),
+    'maintenance_hour': (0, 23),
+    'maintenance_minute': (0, 59),
+    'stale_after_days': (1, 365),
+    'telegram_default_min_discount': (0, 100),
+}
+_ENUMS = {
+    'network_mode': {'auto', 'direct', 'proxy'},
+    'telegram_network_route': {'auto', 'direct', 'proxy'},
+    'telegram_collector_mode': {'public', 'mtproto'},
+}
 
 
 class SettingsImportError(ValueError):
@@ -62,6 +75,31 @@ def export_settings(path: str | Path | None = None) -> Path:
     return destination
 
 
+def _validated_value(name: str, value: Any) -> Any:
+    if name in _INTEGER_RANGES:
+        if isinstance(value, bool):
+            raise SettingsImportError(f'{name} must be an integer')
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise SettingsImportError(f'{name} must be an integer') from exc
+        minimum, maximum = _INTEGER_RANGES[name]
+        if not minimum <= parsed <= maximum:
+            raise SettingsImportError(f'{name} must be between {minimum} and {maximum}')
+        return parsed
+    if name in _ENUMS:
+        if not isinstance(value, str) or value not in _ENUMS[name]:
+            raise SettingsImportError(f'{name} has unsupported value')
+        return value
+    if name in {'telegram_bot_name', 'no_proxy', 'vk_api_version'}:
+        if value is not None and not isinstance(value, str):
+            raise SettingsImportError(f'{name} must be a string')
+        if isinstance(value, str) and any(char in value for char in ('\n', '\r', '\x00')):
+            raise SettingsImportError(f'{name} must be a single line')
+        return value
+    return value
+
+
 def _validate_payload(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise SettingsImportError('settings export must be a JSON object')
@@ -75,11 +113,13 @@ def _validate_payload(payload: Any) -> dict[str, Any]:
     unknown = sorted(set(values) - set(_PORTABLE_FIELDS))
     if unknown:
         raise SettingsImportError(f'unknown or non-portable settings: {", ".join(unknown)}')
-    for key in values:
+    validated: dict[str, Any] = {}
+    for key, value in values.items():
         lower = key.lower()
         if any(marker in lower for marker in _SECRET_FIELD_MARKERS):
             raise SettingsImportError(f'secret-bearing setting is not portable: {key}')
-    return values
+        validated[key] = _validated_value(key, value)
+    return validated
 
 
 def import_settings(path: str | Path) -> dict[str, Any]:
