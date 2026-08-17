@@ -27,8 +27,10 @@ def test_installed_acceptance_has_no_repository_secret_dependency() -> None:
 
 def test_silent_installer_does_not_autolaunch_gui() -> None:
     installer = INSTALLER.read_text(encoding='utf-8')
-    assert 'DiscountParserWorker.exe"; Parameters: "migrate"' in installer
-    assert 'DiscountParser.exe"; WorkingDir: "{app}"' in installer
+    assert '#define MyWorkerExeName "DiscountParserWorker.exe"' in installer
+    assert 'Filename: "{app}\\{#MyWorkerExeName}"; Parameters: "migrate"' in installer
+    assert '#define MyAppExeName "DiscountParser.exe"' in installer
+    assert 'Filename: "{app}\\{#MyAppExeName}"; WorkingDir: "{app}"' in installer
     assert 'postinstall skipifsilent' in installer
 
 
