@@ -1,6 +1,6 @@
 # DP-REL-001 — Immutable release provenance pipeline
 
-**Status:** IMPLEMENTED IN REPOSITORY; server-side GitHub release immutability must be enabled once in repository settings before the first production `v*` release.
+**Status:** COMPLETE — repository implementation is merged and GitHub server-side release immutability was enabled by the repository owner on 2026-08-17.
 
 **Canonical repository:** `arvectum/discount-parser`  
 **Canonical integration branch:** `main`  
@@ -83,11 +83,11 @@ sha256sum -c SHA256SUMS
 
 The repository pipeline never overwrites an existing Release and never moves a release tag. That is a repository policy control.
 
-For GitHub itself to enforce immutability at the platform level, **Enable release immutability** must also be enabled for `arvectum/discount-parser` in repository Settings -> General -> Releases. GitHub applies that setting to future Releases. Once enabled, published release assets cannot be modified/deleted and the associated release tag cannot be moved/deleted while the release exists; GitHub also creates a release attestation for the immutable Release record.
+GitHub's **Enable release immutability** setting was enabled by the repository owner on 2026-08-17. The connected GitHub integration does not currently expose a reliable read endpoint for this setting, so this completion record is based on the owner's explicit confirmation after applying the setting in repository Settings.
 
-The connected GitHub App used for this task has repository admin/push rights but does not expose the new immutable-release administration mutation, and its read attempt against the immutable-release administration endpoint is blocked by the integration. Therefore this one repository setting cannot be truthfully marked as changed from this chat.
+With the setting enabled, future published Releases and their associated release tags are protected by GitHub's server-side immutable-release enforcement in addition to the fail-closed workflow policy.
 
-**Gate:** do not cut the first production `v*` release until the setting is enabled once.
+**Gate:** PASS — the first production `v*` release may now be cut once its intended commit is on `main` and CI is green.
 
 ## 7. Regression coverage
 
@@ -117,7 +117,7 @@ The release job also performs runtime verification before and after publication,
 | Durable GitHub Release assets | PASS |
 | Existing release overwrite rejected | PASS |
 | Draft-first asset-complete publication | PASS |
-| GitHub server-side immutable Release enforcement | ONE-TIME ADMIN SETTING REQUIRED |
+| GitHub server-side immutable Release enforcement | PASS — enabled 2026-08-17 |
 
 ## 9. Historical acceptance evidence
 
@@ -126,8 +126,6 @@ DP-REPO-002 recovered the accepted 2026-08-16 Windows lineage and preserved inst
 DP-REL-001 does not retroactively claim that old installer was built by this new workflow. Its purpose is to ensure that future accepted releases create the commit/tag/build/hash/attestation chain automatically at publication time instead of reconstructing it later.
 
 ## 10. Operational release procedure
-
-After this change is merged and GitHub release immutability is enabled once:
 
 1. ensure the intended release commit is on `main` and CI is green;
 2. create a new immutable-name tag such as `v1.0.0` on that exact `main` commit;
