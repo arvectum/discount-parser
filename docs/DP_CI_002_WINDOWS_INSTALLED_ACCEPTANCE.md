@@ -1,6 +1,6 @@
 # DP-CI-002 — Windows installed acceptance in GitHub Actions
 
-**Status:** IMPLEMENTED, CI acceptance pending on PR.
+**Status:** COMPLETE — accepted on canonical `main` on 2026-08-17.
 
 ## Goal
 
@@ -30,7 +30,7 @@ The job:
 2. installs the exact CPython/dependency closure;
 3. verifies the exact Inno Setup compiler identity;
 4. builds `DiscountParser-Setup.exe` through `scripts/build_windows_ci.ps1`;
-5. installs the Setup executable silently into an isolated `RUNNER_TEMP` directory;
+5. installs the Setup executable silently into an isolated `RUNNER_TEMP` directory and waits for the Inno GUI-subsystem process to exit;
 6. requires the installer to exit successfully and produce an installation log;
 7. verifies the installed executable/config/migration payload;
 8. proves the installer-created runtime database exists in the installed directory and not in the source checkout;
@@ -40,38 +40,61 @@ The job:
 12. waits for `/onboarding/1` to return HTTP 200;
 13. proves an unconfigured first-run UI did not start a `DiscountParserWorker` bot/scheduler process;
 14. stops the GUI;
-15. runs the Inno uninstaller silently;
+15. runs the Inno uninstaller silently, waits for it to exit, and requires exit code 0;
 16. proves installed application payload files were removed;
 17. uploads installer/uninstaller/doctor/HTTP logs and machine-readable acceptance evidence even when the gate fails.
 
 ## Secret boundary
 
-No repository secret is referenced by the installed-acceptance workflow. The application remains intentionally unconfigured and is expected to show onboarding. Telegram configuration is an optional doctor check until the owner completes setup, so this gate can validate the installed product without fabricating customer credentials.
+No repository secret is referenced by the installed-acceptance workflow. The application remains intentionally unconfigured and is expected to show onboarding. Telegram configuration is an optional doctor check until the owner completes setup, so this gate validates the installed product without fabricating customer credentials.
 
 ## Machine-readable evidence
 
-`scripts/windows_installed_acceptance.ps1` writes `installed-acceptance.json` containing:
+`scripts/windows_installed_acceptance.ps1` writes `installed-acceptance.json` containing source SHA, installer SHA-256, installation exit code and payload, database isolation, migrate and doctor results, local HTTP/onboarding status, worker isolation, uninstall result, and final PASS/FAIL status. The evidence contains no Telegram credentials.
 
-- source commit SHA;
-- installer filename and SHA-256;
-- installation directory and exit code;
-- required payload list;
-- installer-created database evidence;
-- explicit migrate exit code;
-- doctor exit code and `ok` state;
-- web port, HTTP status, and onboarding-page state;
-- proof that no unconfigured worker remained running;
-- uninstaller exit code and payload-removal state;
-- final PASS/FAIL status.
+## Acceptance evidence
 
-The evidence contains no Telegram credentials.
+Implementation PR #13 passed all three gates on final head `24144d37aa97b86f3fc321eb4e15e2aaa2363320`:
 
-## Acceptance
+- repository CI run `32028081548`: PASS;
+- three-platform `build-delivery` run `32028081511`: PASS;
+- installed Windows run `32028081540`: PASS.
 
-DP-CI-002 is complete only when:
+PR #13 was merged without bypass as canonical commit:
 
-- repository regression CI passes;
-- the installed-acceptance workflow passes on the implementation PR;
-- the implementation is merged without bypassing checks;
-- the same installed-acceptance workflow passes on canonical `main`;
-- final acceptance evidence is recorded here.
+`2588c169332d4f7bbfce59c37f960bd2bc28e96f`
+
+Canonical-main installed acceptance run `32028465879` passed with machine-readable evidence:
+
+- installer SHA-256: `107b3c490d9d92a301a3cc53ca9378c48b84bdff9e2e24fc59b0541744b30384`;
+- installer exit code: `0`;
+- required installed payload: PASS;
+- installer-created DB in isolated installed directory: PASS;
+- second installed migration: exit `0`;
+- installed doctor: exit `0`, `ok=true`;
+- local web UI: HTTP `200` on port `18765`, onboarding detected;
+- unconfigured worker isolation: PASS;
+- silent uninstall: exit `0`, installed application payload removed.
+
+The first failing installed run also proved the gate is fail-closed: an asynchronous Inno invocation produced no exit code and was rejected. The harness was corrected to use `Start-Process -Wait -PassThru` for both installer and uninstaller, and regression coverage now protects that behavior.
+
+## Acceptance matrix
+
+| Requirement | State |
+|---|---|
+| Reuse DP-CI-001 controlled installer build | PASS |
+| Real Setup.exe execution on clean Windows VM | PASS |
+| Installer exit code captured synchronously | PASS |
+| Installed payload validation | PASS |
+| Runtime DB path isolation | PASS |
+| Installed migration idempotency | PASS |
+| Installed doctor | PASS |
+| Installed local web/onboarding startup | PASS |
+| No Telegram secrets required | PASS |
+| No unconfigured bot/scheduler worker | PASS |
+| Real silent uninstall | PASS |
+| Evidence/log artifact on success/failure | PASS |
+| PR CI/delivery/installed gates | PASS |
+| Canonical `main` replay | PASS |
+
+**DP-CI-002: PASS / COMPLETE.**
