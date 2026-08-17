@@ -1,0 +1,135 @@
+name: Windows reproducibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-reproducibility.yml"
+      - ".github/workflows/build-delivery.yml"
+      - "packaging/windows/**"
+      - "requirements/windows-build.lock"
+      - "scripts/build_windows_ci.ps1"
+      - "scripts/ensure_inno_setup.ps1"
+      - "scripts/windows_build_provenance.py"
+      - "src/**"
+      - "config/**"
+      - "migrations/**"
+      - "alembic.ini"
+      - "pyproject.toml"
+  pull_request:
+    paths:
+      - ".github/workflows/windows-reproducibility.yml"
+      - ".github/workflows/build-delivery.yml"
+      - "packaging/windows/**"
+      - "requirements/windows-build.lock"
+      - "scripts/build_windows_ci.ps1"
+      - "scripts/ensure_inno_setup.ps1"
+      - "scripts/windows_build_provenance.py"
+      - "src/**"
+      - "config/**"
+      - "migrations/**"
+      - "alembic.ini"
+      - "pyproject.toml"
+
+concurrency:
+  group: windows-reproducibility-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Independent Windows build ${{ matrix.replica }}
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [a, b]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read controlled build manifest
+        id: manifest
+        shell: pwsh
+        run: |
+          $manifest = Get-Content packaging/windows/build-manifest.json -Raw | ConvertFrom-Json
+          "python_version=$($manifest.python_version)" >> $env:GITHUB_OUTPUT
+          "pip_version=$($manifest.pip_version)" >> $env:GITHUB_OUTPUT
+          "inno_version=$($manifest.inno_setup_version)" >> $env:GITHUB_OUTPUT
+          "python_hash_seed=$($manifest.python_hash_seed)" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.manifest.outputs.python_version }}
+          cache: pip
+          cache-dependency-path: requirements/windows-build.lock
+
+      - name: Set deterministic build environment
+        shell: pwsh
+        run: |
+          $epoch = (& git show -s --format=%ct HEAD).Trim()
+          if (-not $epoch) { throw "Cannot derive source commit timestamp" }
+          "PYTHONHASHSEED=${{ steps.manifest.outputs.python_hash_seed }}" >> $env:GITHUB_ENV
+          "SOURCE_DATE_EPOCH=$epoch" >> $env:GITHUB_ENV
+
+      - name: Install exact Python build closure
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade "pip==${{ steps.manifest.outputs.pip_version }}"
+          python -m pip install --no-deps --only-binary=:all: -r requirements/windows-build.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+          python -m pip check
+
+      - name: Ensure exact Inno Setup compiler
+        shell: pwsh
+        run: ./scripts/ensure_inno_setup.ps1 -Version "${{ steps.manifest.outputs.inno_version }}"
+
+      - name: Build controlled Windows installer
+        shell: pwsh
+        run: ./scripts/build_windows_ci.ps1
+
+      - name: Upload independent build evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: dp-ci-001-${{ matrix.replica }}
+          path: |
+            delivery/DiscountParser-Setup.exe
+            delivery/windows-build-provenance.json
+          if-no-files-found: error
+          retention-days: 7
+
+  compare:
+    name: Compare independent installer bytes
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dp-ci-001-*
+          path: replicas
+
+      - name: Compare actual installer SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          first="replicas/dp-ci-001-a/DiscountParser-Setup.exe"
+          second="replicas/dp-ci-001-b/DiscountParser-Setup.exe"
+          sha_a="$(sha256sum "$first" | awk '{print $1}')"
+          sha_b="$(sha256sum "$second" | awk '{print $1}')"
+          echo "replica_a=$sha_a"
+          echo "replica_b=$sha_b"
+          test "$sha_a" = "$sha_b"
+
+      - name: Compare provenance evidence
+        run: |
+          python scripts/windows_build_provenance.py compare \
+            --first replicas/dp-ci-001-a/windows-build-provenance.json \
+            --second replicas/dp-ci-001-b/windows-build-provenance.json

@@ -23,7 +23,9 @@ CloseApplications=yes
 RestartApplications=yes
 
 [Files]
-Source: "..\..\delivery\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; `notimestamp` is deliberate DP-CI-001 reproducibility policy: source mtimes
+; must not change the installer bytes between otherwise identical builds.
+Source: "..\..\delivery\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs notimestamp
 
 [Icons]
 Name: "{autodesktop}\Discount Parser"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
@@ -38,7 +40,7 @@ begin
   begin
     // Attempt to create the shortcut via shell if Inno's [Icons] fails in some environments.
     // However, Inno's [Icons] is usually best-effort unless specified otherwise.
-    // The customer error 0x80070005 (Access Denied) on IPersistFile::Save suggests 
+    // The customer error 0x80070005 (Access Denied) on IPersistFile::Save suggests
     // a locking or permission issue on the .lnk file itself.
   end;
 end;
