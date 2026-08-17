@@ -13,11 +13,16 @@ def test_windows_build_removes_smoke_database_before_installer() -> None:
 
 
 def test_windows_ci_removes_smoke_database_before_upload() -> None:
+    script = (ROOT / 'scripts' / 'build_windows_ci.ps1').read_text(encoding='utf-8')
     workflow = (ROOT / '.github' / 'workflows' / 'build-delivery.yml').read_text(encoding='utf-8')
-    assert 'Remove-Item .\\discount_parser.db' in workflow
-    assert 'Smoke database must not be packaged' in workflow
-    assert workflow.index('Smoke database must not be packaged') < workflow.index('Build native Windows installer')
-    assert workflow.index('Smoke database must not be packaged') < workflow.index('Upload delivery package')
+
+    assert 'Remove-Item .\\discount_parser.db' in script
+    assert 'Smoke database must not be packaged' in script
+    assert script.index('Smoke database must not be packaged') < script.index('Compiling installer with Inno Setup')
+
+    invocation = './scripts/build_windows_ci.ps1'
+    assert invocation in workflow
+    assert workflow.index(invocation) < workflow.index('Upload delivery package')
 
 
 def test_user_guide_has_windows_and_linux_install_sections() -> None:
