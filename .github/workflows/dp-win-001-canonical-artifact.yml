@@ -90,13 +90,29 @@ jobs:
             throw "Canonical installer size mismatch: expected 51025181 actual $size"
           }
 
-      - name: Upload exact canonical installer
+      - name: Record worker binary identity
+        shell: pwsh
+        run: |
+          $worker = 'delivery/app/DiscountParserWorker.exe'
+          if (-not (Test-Path $worker)) { throw 'Canonical worker missing' }
+          $workerHash = (Get-FileHash $worker -Algorithm SHA256).Hash.ToLowerInvariant()
+          $workerSize = (Get-Item $worker).Length
+          @(
+            "source_sha=934fa70b42fac7014c3d6a7c15ac75e1a7752874",
+            "worker_sha256=$workerHash",
+            "worker_size_bytes=$workerSize"
+          ) | Set-Content 'delivery/worker-identity.txt' -Encoding UTF8
+          Get-Content 'delivery/worker-identity.txt'
+
+      - name: Upload exact canonical installer and worker evidence
         uses: actions/upload-artifact@v4
         with:
-          name: dp-win-001-canonical-934fa70
+          name: dp-win-001-canonical-934fa70-worker-evidence
           path: |
             delivery/DiscountParser-Setup.exe
             delivery/windows-build-provenance.json
+            delivery/worker-identity.txt
+            delivery/app/DiscountParserWorker.exe
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
