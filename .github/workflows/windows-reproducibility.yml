@@ -16,6 +16,10 @@ on:
       - "alembic.ini"
       - "pyproject.toml"
 
+concurrency:
+  group: windows-reproducibility-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
