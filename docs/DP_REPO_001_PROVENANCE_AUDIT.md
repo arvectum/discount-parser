@@ -50,7 +50,15 @@ The latest operator acceptance record available to this audit reports:
 - recovery tag: `discount-parser-windows-recovery-hotfix-2026-08-16` on commit beginning `b6ba4e0`;
 - accepted installer SHA-256: `E001979A77FF40F3C2FEF84594BE1C57B0C57979CDF331A3EE1D620AD4024509`.
 
-`ff8efb4186ebccca2c30cc78b8fefb5ec7cd0cf5` is **not present in the current GitHub repository**. These values are therefore retained as operator-supplied recovery evidence, not yet as GitHub-native release provenance. They must be verified against the surviving GitVerse/local object graph during DP-REPO-002 before any history is rewritten or refs are removed.
+The new fail-closed GitVerse preflight then independently fetched GitVerse `main` and confirmed it is exactly:
+
+```text
+ff8efb4186ebccca2c30cc78b8fefb5ec7cd0cf5
+```
+
+At the same time GitHub `main` was `bc91a0597e6686f494326f7420b8f4b133ee4913`, and the ancestry check failed. The push step was skipped entirely. Therefore the accepted remote `main` SHA is now **live-verified from GitVerse by GitHub Actions**, not merely operator-reported.
+
+`ff8efb4186ebccca2c30cc78b8fefb5ec7cd0cf5` is still **not present in the current GitHub object graph**. The recovery tag location and installer SHA-256 remain operator/release evidence until their exact surviving objects/artifacts are recovered. They must be reconciled during DP-REPO-002 before any history is rewritten or refs are removed.
 
 ## 3. Critical mirror incident found by the audit
 
@@ -84,7 +92,18 @@ The mirror workflow is changed to **fail closed**:
 - if GitVerse `main` is ahead of or diverged from GitHub `main`, the workflow exits with an error **before pushing any refs**;
 - only an ancestor/equal GitVerse `main` may receive a normal non-force push from GitHub.
 
-Until DP-REPO-002 reconciles history, a failed mirror preflight is the correct/safe result.
+### Live validation of the remediation
+
+The hardened workflow was executed from the audit branch and behaved as designed:
+
+- configuration validation: PASS;
+- canonical GitHub mirror clone: PASS;
+- GitVerse `main` fetch: PASS;
+- ancestry preflight: expected FAIL because GitVerse `main = ff8efb4…` is not an ancestor of GitHub `main = bc91a05…`;
+- push branches/tags step: **SKIPPED**;
+- no force, prune, deletion or partial ref update occurred.
+
+Until DP-REPO-002 reconciles history, this fail-closed result is the correct/safe behavior.
 
 ## 4. Release provenance audit
 
@@ -117,8 +136,8 @@ Effective immediately:
 | Finding | Severity | State after DP-REPO-001 |
 |---|---:|---|
 | GitHub `main` missing newer release/hotfix lineage | Critical | Open; recovery required |
-| Destructive `--force --prune` mirror | Critical | Remediated in this change |
-| Accepted Windows commit absent from GitHub | Critical | Open; recovery evidence preserved |
+| Destructive `--force --prune` mirror | Critical | Remediated and live-validated |
+| Accepted Windows commit absent from GitHub | Critical | Open; GitVerse SHA live-verified |
 | Release-like tags diverge from `main` | High | Open; reconcile, do not rewrite blindly |
 | GitHub Releases absent | High | Open; release pipeline hardening required |
 | `v*` build trigger mismatches existing `r*`/recovery tags | High | Open |
@@ -133,8 +152,10 @@ Effective immediately:
 - [x] canonical control-plane decision is documented;
 - [x] GitHub refs/tags/releases/workflows are inventoried;
 - [x] release graph divergence is identified;
-- [x] accepted external delivery evidence is recorded without pretending it is already GitHub-native;
+- [x] accepted GitVerse `main` SHA is independently live-verified;
+- [x] external installer/tag evidence is recorded without pretending it is already GitHub-native;
 - [x] destructive mirror behavior is identified and made fail-closed;
+- [x] fail-closed mirror behavior is live-validated;
 - [x] deletion/force policy for provenance refs is defined;
 - [x] follow-up recovery and release-provenance work is explicitly gated.
 
@@ -147,8 +168,8 @@ Effective immediately:
 
 Must run before branch cleanup or declaration of a canonical product head:
 
-1. recover/fetch surviving GitVerse and Windows-recovery refs/objects;
-2. prove the exact object for `ff8efb4186ebccca2c30cc78b8fefb5ec7cd0cf5` and the full SHA behind `b6ba4e0`;
+1. fetch/import the live-verified GitVerse `main` object graph rooted at `ff8efb4186ebccca2c30cc78b8fefb5ec7cd0cf5`;
+2. recover/prove the full SHA behind the accepted recovery-tag target beginning `b6ba4e0` and any surviving/deleted release refs;
 3. reconstruct the ancestry of the accepted 2026-08-16 Windows installer;
 4. compare all unique GitHub/GitVerse recovery/hotfix branches by graph and patch equivalence;
 5. import the accepted lineage into GitHub without fabricating history;
