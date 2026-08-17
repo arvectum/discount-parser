@@ -14,6 +14,7 @@ on:
       - "scripts/windows_build_provenance.py"
       - "scripts/windows_installed_acceptance.ps1"
       - "scripts/windows_installer_resilience.ps1"
+      - "scripts/windows_worker_overwrite_acceptance.ps1"
       - "scripts/release_gate.py"
       - "tests/test_windows_installed_acceptance.py"
       - "src/**"
@@ -32,6 +33,7 @@ on:
       - "scripts/windows_build_provenance.py"
       - "scripts/windows_installed_acceptance.ps1"
       - "scripts/windows_installer_resilience.ps1"
+      - "scripts/windows_worker_overwrite_acceptance.ps1"
       - "scripts/release_gate.py"
       - "tests/test_windows_installed_acceptance.py"
       - "src/**"
@@ -117,6 +119,14 @@ jobs:
             -InstallerPath "delivery\DiscountParser-Setup.exe" `
             -EvidenceOutput $evidence
 
+      - name: Exercise stale worker replacement
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "dp-win-001-worker-overwrite\worker-overwrite.json"
+          ./scripts/windows_worker_overwrite_acceptance.ps1 `
+            -InstallerPath "delivery\DiscountParser-Setup.exe" `
+            -EvidenceOutput $evidence
+
       - name: Upload installed-acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -125,6 +135,7 @@ jobs:
           path: |
             ${{ runner.temp }}/dp-ci-002/**
             ${{ runner.temp }}/dp-win-p0-2/**
+            ${{ runner.temp }}/dp-win-001-worker-overwrite/**
             delivery/windows-build-provenance.json
           if-no-files-found: warn
           retention-days: 14
