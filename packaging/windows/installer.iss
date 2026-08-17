@@ -21,7 +21,16 @@ ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
 CloseApplications=yes
-RestartApplications=yes
+; DP-WIN-001: never restart a stale pre-upgrade process after payload replacement.
+; Interactive Setup launches the freshly installed UI from [Run] instead.
+RestartApplications=no
+
+[InstallDelete]
+; DP-WIN-001: the worker is product-owned and must never survive an upgrade as
+; a stale binary. Inno Setup includes [InstallDelete] files in CloseApplications
+; / Restart Manager in-use detection before deletion, so a running old worker is
+; closed first, the old image is deleted, and then [Files] installs the new one.
+Type: files; Name: "{app}\{#MyWorkerExeName}"
 
 [Files]
 ; `notimestamp` is deliberate DP-CI-001 reproducibility policy: source mtimes
@@ -67,9 +76,6 @@ begin
   TargetPath := ExpandConstant('{app}\{#MyAppExeName}');
   ShortcutPath := DesktopShortcutPath();
 
-  // A successful upgrade/reinstall must not intentionally preserve a stale
-  // product-owned shortcut. Failure to remove it is still non-fatal because
-  // Desktop can be redirected, protected, synchronized, or temporarily locked.
   RemoveDesktopShortcutBestEffort();
 
   if not WizardIsTaskSelected('desktopicon') then
@@ -96,10 +102,6 @@ begin
       SW_SHOWNORMAL);
     Log('DP-WIN-P0.2: created desktop shortcut: ' + CreatedShortcut);
   except
-    // CreateShellLink raises on shell/COM/ACL failures such as
-    // IPersistFile::Save 0x80070005. The shortcut is convenience-only, so the
-    // installed application and Start Menu entry remain valid and Setup must
-    // not roll back the payload.
     Log('DP-WIN-P0.2: warning: desktop shortcut creation failed; installation continues: ' + GetExceptionMessage);
   end;
 end;
