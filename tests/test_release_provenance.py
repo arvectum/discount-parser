@@ -83,12 +83,17 @@ def test_release_workflow_has_fail_closed_provenance_controls() -> None:
         encoding="utf-8"
     )
 
+    # DP-CI-003 deliberately strengthens the old ancestry rule: a new release
+    # tag must point to the exact current canonical main HEAD, not merely any
+    # historical commit reachable from main.
     required_fragments = [
-        "git merge-base --is-ancestor",
+        "git rev-parse origin/main",
+        "Release tag must point to the exact current canonical origin/main HEAD",
         "refusing to replace or mutate it",
         "actions/attest@v4",
         "release/SHA256SUMS",
         "release/release-provenance.json",
+        "release/release-gate.json",
         "--verify-tag",
         "--draft",
         "--draft=false",
