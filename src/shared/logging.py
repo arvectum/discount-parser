@@ -16,11 +16,16 @@ _STANDARD_LOG_KEYS = {
     "processName", "process", "taskName",
 }
 
+# DP-SEC-001: logging is a user-shareable boundary. Redaction intentionally
+# covers both named settings and common protocol/header representations so a
+# traceback or third-party exception cannot leak credentials into app.log.
 _SECRET_PATTERNS = [
-    re.compile(r"(?i)(bot[_-]?token|api[_-]?hash|password|access[_-]?token|secret|authorization|vk[_-]?access[_-]?token)\s*[:=]\s*['\"]?([^'\"\s&]+)"),
-    re.compile(r"\d{7,12}:[A-Za-z0-9_-]{34,40}"),  # Telegram Bot token pattern (more robust)
+    re.compile(
+        r"(?i)\b(bot[_-]?token|telegram[_-]?bot[_-]?token|api[_-]?(?:key|hash)|password|passwd|proxy[_-]?password|access[_-]?token|secret|session|authorization|proxy-authorization|vk[_-]?access[_-]?token|cookie|set-cookie|x-api-key|telegram[_-]?(?:channel_id|admin_ids)|admin[_-]?id|channel[_-]?id)\s*[:=]\s*['\"]?([^'\"\s,;]+)"
+    ),
+    re.compile(r"(?i)(https?://)([^/@:\s]+):([^/@\s]+)@"),
+    re.compile(r"\d{7,12}:[A-Za-z0-9_-]{34,46}"),
 ]
-
 
 
 def redact_secrets(text: str) -> str:
@@ -30,9 +35,32 @@ def redact_secrets(text: str) -> str:
     for pattern in _SECRET_PATTERNS:
         if pattern.groups == 2:
             result = pattern.sub(r"\1=***REDACTED***", result)
+        elif pattern.groups == 3:
+            result = pattern.sub(r"\1***REDACTED***:***REDACTED***@", result)
         else:
             result = pattern.sub(r"***REDACTED_TOKEN***", result)
     return result
+
+
+def redact_value(value):
+    """Recursively redact strings in structured logging extras.
+
+    JSON log extras frequently contain nested dict/list payloads. Converting an
+    entire object to one string loses structure and can leave secrets in custom
+    serializers; recursively redacting keeps the useful shape and the privacy
+    boundary at the formatter.
+    """
+    if isinstance(value, str):
+        return redact_secrets(value)
+    if isinstance(value, dict):
+        return {str(key): redact_value(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(redact_value(item) for item in value)
+    if isinstance(value, list):
+        return [redact_value(item) for item in value]
+    if isinstance(value, set):
+        return sorted(redact_value(item) for item in value)
+    return value
 
 
 class SecretFilter(logging.Filter):
@@ -40,10 +68,7 @@ class SecretFilter(logging.Filter):
         if isinstance(record.msg, str):
             record.msg = redact_secrets(record.msg)
         if record.args:
-            if isinstance(record.args, dict):
-                record.args = {k: redact_secrets(str(v)) if isinstance(v, str) else v for k, v in record.args.items()}
-            elif isinstance(record.args, tuple):
-                record.args = tuple(redact_secrets(str(v)) if isinstance(v, str) else v for v in record.args)
+            record.args = redact_value(record.args)
         return True
 
 
@@ -58,7 +83,7 @@ class JsonFormatter(logging.Formatter):
         }
         for key, value in record.__dict__.items():
             if key not in _STANDARD_LOG_KEYS and not key.startswith("_"):
-                payload[key] = redact_secrets(str(value)) if isinstance(value, str) else value
+                payload[key] = redact_value(value)
         if record.exc_info:
             payload["exception"] = redact_secrets(self.formatException(record.exc_info))
         return json.dumps(payload, ensure_ascii=False, default=str)
@@ -78,7 +103,6 @@ def app_log_path() -> Path:
 
 def configure_logging(level: str = "INFO", log_format: str = "plain", *, component: str | None = None, enable_file: bool = True) -> None:
     root = logging.getLogger()
-    # Reset any existing handlers on the root logger to avoid duplication or interference
     for h in root.handlers[:]:
         root.removeHandler(h)
         h.close()
@@ -101,7 +125,7 @@ def configure_logging(level: str = "INFO", log_format: str = "plain", *, compone
             file_path = app_log_path()
             file_handler = RotatingFileHandler(
                 file_path,
-                maxBytes=5 * 1024 * 1024,  # 5 MB
+                maxBytes=5 * 1024 * 1024,
                 backupCount=5,
                 encoding="utf-8",
                 delay=False,
@@ -109,7 +133,6 @@ def configure_logging(level: str = "INFO", log_format: str = "plain", *, compone
             file_handler.setFormatter(StandardFormatter(fmt_str, datefmt=date_fmt))
             file_handler.addFilter(SecretFilter())
             root.addHandler(file_handler)
-            # Ensure the file is not empty initially and writable
             with open(file_path, "a", encoding="utf-8") as f:
                 f.write("")
         except Exception:
