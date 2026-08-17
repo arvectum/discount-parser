@@ -1,0 +1,36 @@
+name: DP-REPO-002 Import Accepted Windows Object
+
+on:
+  push:
+    branches:
+      - recovery/dp-repo-002-import
+
+permissions:
+  contents: write
+
+jobs:
+  import-object:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch exact GitVerse commit and upload object pack to GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
+          ACCEPTED_SHA: b6ba4e0808d640e938bdd53eb1cf87b2416cca10
+        run: |
+          set -euo pipefail
+          git clone --bare "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPOSITORY}.git" repo.git
+          cd repo.git
+          git remote add gitverse "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/arvectum/${GITVERSE_REPOSITORY}.git"
+          git fetch --no-tags gitverse "$ACCEPTED_SHA:refs/recovery/accepted-windows-object"
+          test "$(git rev-parse refs/recovery/accepted-windows-object)" = "$ACCEPTED_SHA"
+          echo "ACCEPTED_OBJECT_FETCHED=$ACCEPTED_SHA"
+          set +e
+          git push origin "$ACCEPTED_SHA:refs/heads/recovery/object-staging-b6ba4e0-20260816"
+          rc=$?
+          set -e
+          echo "STAGING_PUSH_EXIT=$rc"
+          echo "The ref may be rejected by workflow-permission policy; the object pack upload is the intended staging operation."
