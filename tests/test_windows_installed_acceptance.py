@@ -109,7 +109,9 @@ def test_dp_win_p0_2_resilience_gate_exercises_unicode_and_shortcut_failure() ->
         'Пользователь-Анастасия',
         'Анастасия\\BlockedDesktop\\DiscountParser',
         '/TASKS=desktopicon',
-        'New-Object -ComObject WScript.Shell',
+        'Assert-ShortcutLaunchesTarget',
+        "Get-CimInstance Win32_Process -Filter \"Name = 'DiscountParser.exe'\"",
+        'Start-Process -FilePath $ShortcutPath',
         'New-Item -ItemType Directory -Path $DesktopShortcut',
         'best_effort_failure_observed',
         'desktop_failure_nonfatal',
@@ -126,7 +128,7 @@ def test_dp_win_p0_2_resilience_gate_exercises_unicode_and_shortcut_failure() ->
     # the installed payload, not merely observe that shortcut creation failed.
     assert 'if ($blockedExit -ne 0)' in harness
     assert 'Assert-InstalledPayload $BlockedInstallDir' in harness
-    assert 'Assert-ShortcutTarget $StartMenuShortcut $blockedExe $BlockedInstallDir' in harness
+    assert 'Assert-ShortcutLaunchesTarget $StartMenuShortcut $blockedExe' in harness
 
 
 def test_acceptance_evidence_is_uploaded_even_on_failure() -> None:
