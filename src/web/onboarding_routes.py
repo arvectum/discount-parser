@@ -48,21 +48,51 @@ def _error(message: str) -> str:
 def _test_telegram(bot_token: str, channel_id: str) -> tuple[bool, str]:
     try:
         with httpx.Client(timeout=12.0) as client:
+            # 1. getMe()
             me = client.get(f'https://api.telegram.org/bot{bot_token}/getMe')
             payload = me.json()
             if not me.is_success or not payload.get('ok'):
-                return False, 'Telegram отклонил токен бота.'
-            username = payload.get('result', {}).get('username') or 'bot'
-            chat = client.get(
+                return False, 'Ошибка Telegram: неверный Bot Token.'
+            
+            bot_info = payload.get('result', {})
+            bot_username = bot_info.get('username', 'bot')
+            
+            # 2. getChat(channel_id)
+            chat_resp = client.get(
                 f'https://api.telegram.org/bot{bot_token}/getChat',
                 params={'chat_id': channel_id},
             )
-            chat_payload = chat.json()
-            if not chat.is_success or not chat_payload.get('ok'):
-                return False, f'Бот @{username} найден, но канал недоступен. Проверьте ID/@username и права бота.'
-        return True, f'Бот @{username} и канал доступны через Telegram Bot API.'
+            chat_payload = chat_resp.json()
+            if not chat_resp.is_success or not chat_payload.get('ok'):
+                err_msg = chat_payload.get('description', 'чат недоступен')
+                return False, f'Бот @{bot_username} найден, но канал "{channel_id}" недоступен ({err_msg}). Проверьте ID/@username и что бот добавлен в канал.'
+
+            chat_info = chat_payload.get('result', {})
+            chat_type = chat_info.get('type')
+            if chat_type not in ('channel', 'supergroup', 'group'):
+                return False, f'Указанный ID соответствует типу "{chat_type}", а не каналу. Укажите @username или ID канала.'
+
+            # 3. getChatMember(channel_id, bot_id) to check admin status
+            bot_id = bot_info.get('id')
+            member_resp = client.get(
+                f'https://api.telegram.org/bot{bot_token}/getChatMember',
+                params={'chat_id': channel_id, 'user_id': bot_id},
+            )
+            member_payload = member_resp.json()
+            if not member_resp.is_success or not member_payload.get('ok'):
+                return False, f'Не удалось проверить статус бота в канале. Проверьте права бота.'
+            
+            member_status = member_payload.get('result', {}).get('status')
+            if member_status not in ('administrator', 'creator'):
+                return False, f'Бот добавлен в канал, но не является администратором (текущий статус: {member_status}).'
+            
+            can_post = member_payload.get('result', {}).get('can_post_messages')
+            if can_post is False:
+                return False, 'Бот администратор, но у него нет права публикации сообщений (can_post_messages).'
+
+        return True, f'Успех: Бот @{bot_username} является администратором канала "{chat_info.get("title", channel_id)}" с правом публикации.'
     except Exception as exc:
-        return False, f'Не удалось проверить Telegram: {type(exc).__name__}. Проверьте интернет и повторите.'
+        return False, f'Сетевая ошибка при проверке Telegram: {type(exc).__name__}.'
 
 
 def _test_vk(access_token: str, api_version: str) -> tuple[bool, str]:

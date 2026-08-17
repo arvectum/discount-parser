@@ -49,6 +49,15 @@ def create_source(
     merchant: str | None = None,
     brand: str | None = None,
     auth_profile: str | None = None,
+    item_selector: str | None = None,
+    title_selector: str | None = None,
+    promo_code_selector: str | None = None,
+    promo_code_attribute: str | None = None,
+    conditions_selector: str | None = None,
+    valid_until_selector: str | None = None,
+    link_selector: str | None = None,
+    reveal_selector: str | None = None,
+    reveal_code_attribute: str | None = None,
     priority: int = 50,
     trust_level: str = "unknown",
     check_interval_minutes: int = 120,
@@ -83,6 +92,15 @@ def create_source(
         brand=brand.strip() if brand else None,
         collector_type=collector_type.strip(),
         auth_profile=auth_profile.strip() if auth_profile else None,
+        item_selector=item_selector.strip() if item_selector else None,
+        title_selector=title_selector.strip() if title_selector else None,
+        promo_code_selector=promo_code_selector.strip() if promo_code_selector else None,
+        promo_code_attribute=promo_code_attribute.strip() if promo_code_attribute else None,
+        conditions_selector=conditions_selector.strip() if conditions_selector else None,
+        valid_until_selector=valid_until_selector.strip() if valid_until_selector else None,
+        link_selector=link_selector.strip() if link_selector else None,
+        reveal_selector=reveal_selector.strip() if reveal_selector else None,
+        reveal_code_attribute=reveal_code_attribute.strip() if reveal_code_attribute else None,
         priority=priority,
         trust_level=trust_level,
         check_interval_minutes=check_interval_minutes,
@@ -100,6 +118,36 @@ def set_source_enabled(session: Session, source_id: int, enabled: bool) -> Regis
         raise KeyError(source_id)
     source.enabled = enabled
     source.status = "unknown" if enabled else "disabled"
+    source.updated_at = _now()
+    session.flush()
+    return source
+
+
+def update_source(session: Session, source_id: int, **values) -> RegisteredSource:
+    """Update a managed source without bypassing registry ownership rules."""
+    source = session.get(RegisteredSource, source_id)
+    if source is None:
+        raise KeyError(source_id)
+    editable = {
+        'name', 'platform', 'source_type', 'url', 'external_id', 'merchant',
+        'collector_type', 'trust_level', 'priority', 'check_interval_minutes',
+        'item_selector', 'title_selector', 'promo_code_selector',
+        'promo_code_attribute', 'conditions_selector', 'valid_until_selector',
+        'link_selector', 'reveal_selector', 'reveal_code_attribute',
+    }
+    unknown = set(values) - editable
+    if unknown:
+        raise ValueError('Unsupported source fields: ' + ', '.join(sorted(unknown)))
+    if values.get('platform', source.platform) not in PLATFORMS:
+        raise ValueError('Unsupported platform')
+    if values.get('trust_level', source.trust_level) not in TRUST_LEVELS:
+        raise ValueError('Unsupported trust level')
+    priority = int(values.get('priority', source.priority))
+    interval = int(values.get('check_interval_minutes', source.check_interval_minutes))
+    if not 0 <= priority <= 100 or not 1 <= interval <= 10080:
+        raise ValueError('Invalid source priority or interval')
+    for field, value in values.items():
+        setattr(source, field, value.strip() if isinstance(value, str) and field not in {'url'} else value)
     source.updated_at = _now()
     session.flush()
     return source

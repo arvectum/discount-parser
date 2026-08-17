@@ -11,7 +11,7 @@ from src.jobs.scheduler import run_scheduler
 from src.modules.source_registry.seed import seed_registry
 from src.qa.doctor import build_doctor_report
 from src.shared.config import get_settings
-from src.shared.db import session_scope
+from src.shared.db import check_and_recover_db, session_scope
 from src.telegram.runner import run_bot
 from src.web.launcher import run_web_panel
 
@@ -41,6 +41,7 @@ def doctor() -> int:
 
 def main() -> int:
     _prepare_runtime_directory()
+    check_and_recover_db()
     command_name = sys.argv[1] if len(sys.argv) > 1 else 'web'
     if command_name == 'web':
         run_web_panel()

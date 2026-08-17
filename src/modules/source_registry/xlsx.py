@@ -14,6 +14,8 @@ from src.shared.db import create_session
 SOURCE_HEADERS = [
     "key", "name", "platform", "source_type", "url", "external_id", "merchant", "brand",
     "collector_type", "auth_profile", "priority", "trust_level", "check_interval_minutes", "enabled",
+    "item_selector", "title_selector", "promo_code_selector", "promo_code_attribute", "conditions_selector",
+    "valid_until_selector", "link_selector", "reveal_selector", "reveal_code_attribute",
     "status", "last_checked_at", "last_success_at", "last_error",
 ]
 CANDIDATE_HEADERS = [
@@ -136,6 +138,15 @@ def import_source_registry_xlsx(path: str | Path) -> RegistryImportReport:
                                 brand=_text(_value(row, index, "brand")),
                                 collector_type=_text(_value(row, index, "collector_type")) or "public_page",
                                 auth_profile=_text(_value(row, index, "auth_profile")),
+                                item_selector=_text(_value(row, index, "item_selector")),
+                                title_selector=_text(_value(row, index, "title_selector")),
+                                promo_code_selector=_text(_value(row, index, "promo_code_selector")),
+                                promo_code_attribute=_text(_value(row, index, "promo_code_attribute")),
+                                conditions_selector=_text(_value(row, index, "conditions_selector")),
+                                valid_until_selector=_text(_value(row, index, "valid_until_selector")),
+                                link_selector=_text(_value(row, index, "link_selector")),
+                                reveal_selector=_text(_value(row, index, "reveal_selector")),
+                                reveal_code_attribute=_text(_value(row, index, "reveal_code_attribute")),
                                 priority=_int(_value(row, index, "priority"), 50),
                                 trust_level=_text(_value(row, index, "trust_level")) or "unknown",
                                 check_interval_minutes=_int(_value(row, index, "check_interval_minutes"), 120),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import socket
 import sys
 import threading
@@ -56,6 +57,14 @@ def _uvicorn_logging_kwargs() -> dict[str, object]:
 
 def run_web_panel() -> None:
     settings = get_settings()
+    
+    # Create a named mutex to allow the installer to detect running process
+    if sys.platform == 'win32':
+        mutex_name = 'DiscountParserMutex_{E9D2A6B6-4F2B-4C7A-90EE-44C33AC43FD2}'
+        ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
+
+    from src.shared.logging import configure_logging
+    configure_logging(level=settings.log_level, log_format=settings.log_format, component="web", enable_file=True)
     url = f'http://127.0.0.1:{settings.web_port}'
 
     # A repeated click on the desktop shortcut should focus/open the existing

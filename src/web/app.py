@@ -46,7 +46,7 @@ def _metrics() -> dict[str, int]:
     with create_session() as session:
         total = int(session.scalar(select(func.count()).select_from(Offer)) or 0)
         result = {'total': total}
-        for status in ('ready', 'needs_review', 'published', 'expired'):
+        for status in ('new', 'ready', 'needs_review', 'published', 'expired'):
             result[status] = int(session.scalar(select(func.count()).select_from(Offer).where(Offer.status == status)) or 0)
         return result
 
@@ -65,7 +65,9 @@ def _run_parse_thread(*, city: str | None = None, region: str | None = None) -> 
     _parse_state['city'] = city
     _parse_state['region'] = region
     try:
+        from src.modules.source_registry.runner import collect_registered_sources
         run_all(path=get_settings().sources_config_path, city=city, region=region)
+        collect_registered_sources()
     except Exception as exc:
         _parse_state['last_error'] = f'{type(exc).__name__}: {exc}'
     finally:
@@ -203,7 +205,7 @@ def dashboard(message: str | None = None):
     <div class="top"><div class="brand"><h1>Discount Parser</h1><div class="muted">Панель управления парсером и Telegram-ботом</div></div><div class="row"><a class="btn secondary" href="/export">Скачать XLSX</a><a class="btn secondary" href="/setup">Telegram</a></div></div>
     {flash}
     <div class="grid">
-      <div class="card"><div class="muted">Всего предложений</div><div class="metric">{metrics['total']}</div></div>
+      <div class="card"><div class="muted">Всего найдено</div><div class="metric">{metrics['total']}</div><div class="muted small">{metrics['new']} новых</div></div>
       <div class="card"><div class="muted">Готово</div><div class="metric">{metrics['ready']}</div></div>
       <div class="card"><div class="muted">На проверке</div><div class="metric">{metrics['needs_review']}</div></div>
       <div class="card"><div class="muted">Опубликовано</div><div class="metric">{metrics['published']}</div></div>
