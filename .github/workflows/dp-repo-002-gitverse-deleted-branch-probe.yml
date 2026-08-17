@@ -1,0 +1,45 @@
+name: DP-REPO-002 GitVerse Deleted Branch Probe
+
+on:
+  push:
+    branches:
+      - recovery/dp-repo-002-import
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Search GitVerse Actions history for deleted recovery branch
+        env:
+          GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.gitverse.ru/repos/arvectum/${GITVERSE_REPOSITORY}/actions/runs"
+          target='refs/heads/fix/windows-installer-startup-recovery'
+          found=0
+          for page in $(seq 1 10); do
+            f="$(mktemp)"
+            status="$(curl -sS -o "$f" -w '%{http_code}' \
+              -H "Authorization: Bearer ${GITVERSE_TOKEN}" \
+              -H 'Accept: application/vnd.gitverse.object+json;version=latest' \
+              "${api}?per_page=50&page=${page}")"
+            test "$status" = 200 || { echo "API_STATUS=$status page=$page"; exit 1; }
+            count="$(jq '(.workflow_runs // .runs // .items // (if type=="array" then . else [] end)) | length' "$f")"
+            [ "$count" -gt 0 ] || break
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              echo "$line"
+              found=$((found+1))
+            done < <(jq -r --arg target "$target" '
+              (.workflow_runs // .runs // .items // (if type=="array" then . else [] end))[] |
+              select((.ref // .head_branch // "") == $target) |
+              "MATCH|id=\(.id // "-")|sha=\(.commit_sha // .head_sha // "-")|ref=\(.ref // .head_branch // "-")|title=\(.title // .name // "-")"
+            ' "$f")
+          done
+          echo "MATCH_COUNT=$found"
