@@ -18,10 +18,19 @@ if (-not $env:SOURCE_DATE_EPOCH) {
     }
 }
 
+$ExpectedInnoVersion = [string]$Manifest.inno_setup_version
+if ($env:DP_INNO_SETUP_VERSION -ne $ExpectedInnoVersion) {
+    throw "Verified Inno Setup identity is required: expected $ExpectedInnoVersion, got $env:DP_INNO_SETUP_VERSION"
+}
+$IsccPath = $env:DP_ISCC_PATH
+if (-not $IsccPath -or -not (Test-Path $IsccPath)) {
+    throw "Verified ISCC.exe path is missing: $IsccPath"
+}
+
 Write-Host "DP-CI-001 controlled build inputs:"
 Write-Host "  Python: $($Manifest.python_version)"
 Write-Host "  PyInstaller: $($Manifest.pyinstaller_version)"
-Write-Host "  Inno Setup: $($Manifest.inno_setup_version)"
+Write-Host "  Inno Setup: $ExpectedInnoVersion"
 Write-Host "  PYTHONHASHSEED: $env:PYTHONHASHSEED"
 Write-Host "  SOURCE_DATE_EPOCH: $env:SOURCE_DATE_EPOCH"
 
@@ -93,25 +102,7 @@ Get-ChildItem delivery\app -Recurse -Force -Include *.pyc, *.rej, .pytest_cache 
 if (-not (Test-Path "delivery\app\DiscountParser.exe")) { throw "DiscountParser.exe missing from staging" }
 if (-not (Test-Path "delivery\app\DiscountParserWorker.exe")) { throw "DiscountParserWorker.exe missing from staging" }
 
-$IsccCandidates = @(
-  "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-  "C:\Program Files\Inno Setup 6\ISCC.exe",
-  "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
-)
-$IsccCommand = Get-Command iscc.exe -ErrorAction SilentlyContinue
-$IsccPath = if ($IsccCommand) { $IsccCommand.Source } else { $IsccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1 }
-if (-not $IsccPath) { throw "Inno Setup 6 compiler not found" }
-
-$RawInnoVersion = (Get-Item $IsccPath).VersionInfo.ProductVersion
-if ($RawInnoVersion -notmatch '(\d+\.\d+\.\d+)') {
-    throw "Cannot determine Inno Setup version from $IsccPath (reported: $RawInnoVersion)"
-}
-$InnoVersion = $Matches[1]
-if ($InnoVersion -ne [string]$Manifest.inno_setup_version) {
-    throw "Inno Setup version mismatch: expected $($Manifest.inno_setup_version), got $InnoVersion"
-}
-
-Write-Host "Compiling installer with Inno Setup $InnoVersion..."
+Write-Host "Compiling installer with Inno Setup $ExpectedInnoVersion..."
 & $IsccPath "packaging\windows\installer.iss"
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler failed with exit code $LASTEXITCODE" }
 
@@ -124,7 +115,7 @@ $SourceSha = if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { (& git rev-parse HE
   --manifest $ManifestPath `
   --installer "delivery\DiscountParser-Setup.exe" `
   --source-sha $SourceSha `
-  --inno-version $InnoVersion `
+  --inno-version $ExpectedInnoVersion `
   --output $EvidenceOutput
 if ($LASTEXITCODE -ne 0) { throw "Windows build provenance validation failed" }
 
