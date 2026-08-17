@@ -1,0 +1,90 @@
+name: DP-WIN-001 worker command diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ops/dp-win-001-canonical-artifact
+    paths:
+      - .github/workflows/dp-win-001-worker-command-diagnostic.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 934fa70b42fac7014c3d6a7c15ac75e1a7752874
+          fetch-depth: 0
+      - name: Read manifest
+        id: manifest
+        shell: pwsh
+        run: |
+          $m = Get-Content packaging/windows/build-manifest.json -Raw | ConvertFrom-Json
+          "python_version=$($m.python_version)" >> $env:GITHUB_OUTPUT
+          "pip_version=$($m.pip_version)" >> $env:GITHUB_OUTPUT
+          "inno_version=$($m.inno_setup_version)" >> $env:GITHUB_OUTPUT
+          "python_hash_seed=$($m.python_hash_seed)" >> $env:GITHUB_OUTPUT
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.manifest.outputs.python_version }}
+          cache: pip
+          cache-dependency-path: requirements/windows-build.lock
+      - name: Deterministic env
+        shell: pwsh
+        run: |
+          "PYTHONHASHSEED=${{ steps.manifest.outputs.python_hash_seed }}" >> $env:GITHUB_ENV
+          $epoch = (& git show -s --format=%ct HEAD).Trim()
+          "SOURCE_DATE_EPOCH=$epoch" >> $env:GITHUB_ENV
+      - name: Install closure
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade "pip==${{ steps.manifest.outputs.pip_version }}"
+          python -m pip install --no-deps --only-binary=:all: -r requirements/windows-build.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+          python -m pip check
+      - name: Ensure Inno
+        shell: pwsh
+        run: ./scripts/ensure_inno_setup.ps1 -Version "${{ steps.manifest.outputs.inno_version }}"
+      - name: Build
+        shell: pwsh
+        run: ./scripts/build_windows_ci.ps1
+      - name: Probe frozen worker before installer
+        shell: pwsh
+        run: |
+          Push-Location delivery/app
+          try {
+            & .\DiscountParserWorker.exe status-json
+            if ($LASTEXITCODE -ne 0) { throw "preinstall status-json failed: $LASTEXITCODE" }
+            & .\DiscountParserWorker.exe db-status
+            if ($LASTEXITCODE -ne 0) { throw "preinstall db-status failed: $LASTEXITCODE" }
+            & .\DiscountParserWorker.exe db-backup
+            if ($LASTEXITCODE -ne 0) { throw "preinstall db-backup failed: $LASTEXITCODE" }
+            & .\DiscountParserWorker.exe settings-export "$env:RUNNER_TEMP\settings.json"
+            if ($LASTEXITCODE -ne 0) { throw "preinstall settings-export failed: $LASTEXITCODE" }
+          } finally { Pop-Location }
+      - name: Install canonical setup to isolated dir
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'dp-installed-command-probe'
+          & delivery\DiscountParser-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="$dir"
+          if ($LASTEXITCODE -ne 0) { throw "installer failed $LASTEXITCODE" }
+          "DP_PROBE_INSTALL_DIR=$dir" >> $env:GITHUB_ENV
+      - name: Probe installed worker
+        shell: pwsh
+        run: |
+          Push-Location $env:DP_PROBE_INSTALL_DIR
+          try {
+            & .\DiscountParserWorker.exe status-json
+            if ($LASTEXITCODE -ne 0) { throw "installed status-json failed: $LASTEXITCODE" }
+            & .\DiscountParserWorker.exe db-status
+            if ($LASTEXITCODE -ne 0) { throw "installed db-status failed: $LASTEXITCODE" }
+            & .\DiscountParserWorker.exe db-backup
+            if ($LASTEXITCODE -ne 0) { throw "installed db-backup failed: $LASTEXITCODE" }
+            & .\DiscountParserWorker.exe settings-export "$env:RUNNER_TEMP\settings-installed.json"
+            if ($LASTEXITCODE -ne 0) { throw "installed settings-export failed: $LASTEXITCODE" }
+          } finally { Pop-Location }
