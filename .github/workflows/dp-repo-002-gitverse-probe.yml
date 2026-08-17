@@ -1,0 +1,61 @@
+name: DP-REPO-002 GitVerse Deleted Ref Probe
+
+on:
+  push:
+    branches:
+      - recovery/dp-repo-002-import
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe GitVerse API for b6ba4e0 and historical run metadata
+        env:
+          GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
+        run: |
+          set -euo pipefail
+          test -n "$GITVERSE_TOKEN"
+          test -n "$GITVERSE_REPOSITORY"
+          api="https://api.gitverse.ru/repos/arvectum/${GITVERSE_REPOSITORY}"
+          auth=(-H "Authorization: Bearer ${GITVERSE_TOKEN}" -H "Accept: application/vnd.gitverse.object+json;version=latest")
+
+          echo "DP_REPO_002_GITVERSE_PROBE_BEGIN"
+          tmp="$(mktemp)"
+          status="$(curl -sS -o "$tmp" -w '%{http_code}' "${auth[@]}" "$api/commits/b6ba4e0" || true)"
+          echo "COMMIT_PREFIX_STATUS=$status"
+          if [ "$status" = "200" ]; then
+            python - "$tmp" <<'PY'
+import json, sys
+obj=json.load(open(sys.argv[1], encoding='utf-8'))
+sha=obj.get('sha') or obj.get('id') or obj.get('commit_sha')
+msg=(obj.get('commit') or {}).get('message') if isinstance(obj.get('commit'), dict) else obj.get('message')
+print(f"COMMIT_PREFIX_FULL_SHA={sha}")
+print(f"COMMIT_PREFIX_MESSAGE={str(msg).splitlines()[0] if msg else '-'}")
+PY
+          else
+            echo "COMMIT_PREFIX_FULL_SHA=-"
+          fi
+
+          runs="$(mktemp)"
+          runs_status="$(curl -sS -o "$runs" -w '%{http_code}' "${auth[@]}" "$api/actions/runs?per_page=50&page=1" || true)"
+          echo "ACTIONS_RUNS_STATUS=$runs_status"
+          if [ "$runs_status" = "200" ]; then
+            python - "$runs" <<'PY'
+import json, sys
+obj=json.load(open(sys.argv[1], encoding='utf-8'))
+runs=obj.get('workflow_runs') or obj.get('runs') or obj.get('items') or (obj if isinstance(obj,list) else [])
+print(f"ACTIONS_RUN_COUNT_PAGE1={len(runs)}")
+for r in runs:
+    sha=str(r.get('commit_sha') or r.get('head_sha') or '')
+    ref=str(r.get('ref') or r.get('head_branch') or '')
+    title=str(r.get('title') or r.get('name') or '')
+    if sha.startswith('b6ba4e0') or 'windows-recovery' in ref.lower() or 'windows-recovery' in title.lower() or 'telegram-hotfix' in ref.lower():
+        print(f"MATCH_RUN|sha={sha}|ref={ref}|title={title}|id={r.get('id','-')}")
+PY
+          fi
+          echo "DP_REPO_002_GITVERSE_PROBE_END"
