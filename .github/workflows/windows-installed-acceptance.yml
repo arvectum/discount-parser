@@ -13,6 +13,7 @@ on:
       - "scripts/ensure_inno_setup.ps1"
       - "scripts/windows_build_provenance.py"
       - "scripts/windows_installed_acceptance.ps1"
+      - "scripts/windows_installer_resilience.ps1"
       - "scripts/release_gate.py"
       - "tests/test_windows_installed_acceptance.py"
       - "src/**"
@@ -30,6 +31,7 @@ on:
       - "scripts/ensure_inno_setup.ps1"
       - "scripts/windows_build_provenance.py"
       - "scripts/windows_installed_acceptance.ps1"
+      - "scripts/windows_installer_resilience.ps1"
       - "scripts/release_gate.py"
       - "tests/test_windows_installed_acceptance.py"
       - "src/**"
@@ -107,6 +109,14 @@ jobs:
             -EvidenceOutput $evidence `
             -WebPort 18765
 
+      - name: Exercise DP-WIN-P0.2 installer resilience
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "dp-win-p0-2\installer-resilience.json"
+          ./scripts/windows_installer_resilience.ps1 `
+            -InstallerPath "delivery\DiscountParser-Setup.exe" `
+            -EvidenceOutput $evidence
+
       - name: Upload installed-acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -114,6 +124,7 @@ jobs:
           name: dp-ci-002-installed-windows
           path: |
             ${{ runner.temp }}/dp-ci-002/**
+            ${{ runner.temp }}/dp-win-p0-2/**
             delivery/windows-build-provenance.json
           if-no-files-found: warn
           retention-days: 14
