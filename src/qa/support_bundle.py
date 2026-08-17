@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from src.qa.doctor import build_doctor_report
+from src.qa.operational_status import build_operational_status
 from src.qa.report import build_smoke_report
 from src.shared.config import get_settings
 from src.shared.logging import redact_secrets
@@ -140,6 +141,13 @@ def _safe_smoke_report() -> dict[str, Any]:
         return {"available": False, "error": sanitize_text(f"{type(exc).__name__}: {exc}")}
 
 
+def _safe_operational_status() -> dict[str, Any]:
+    try:
+        return build_operational_status()
+    except Exception as exc:
+        return {"state": "error", "error": sanitize_text(f"{type(exc).__name__}: {exc}")}
+
+
 def _read_log_tail(path: Path) -> bytes:
     size = path.stat().st_size
     with path.open("rb") as handle:
@@ -154,6 +162,7 @@ def _collect_payload() -> dict[str, bytes]:
     payload: dict[str, bytes] = {
         "diagnostics/runtime.json": _json_bytes(_runtime_metadata()),
         "diagnostics/configuration.json": _json_bytes(_configuration_summary()),
+        "diagnostics/operational-status.json": _json_bytes(_safe_operational_status()),
         "diagnostics/doctor.json": _json_bytes(_safe_doctor_report()),
         "diagnostics/smoke-report.json": _json_bytes(_safe_smoke_report()),
     }
