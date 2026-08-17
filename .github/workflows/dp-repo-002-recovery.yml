@@ -1,0 +1,194 @@
+name: DP-REPO-002 Canonical History Recovery
+
+on:
+  push:
+    branches:
+      - recovery/dp-repo-002-import
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate recovery configuration
+        env:
+          GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
+        run: |
+          set -euo pipefail
+          test -n "$GITVERSE_TOKEN" || { echo "::error::GITVERSE_TOKEN is missing"; exit 1; }
+          test -n "$GITVERSE_REPOSITORY" || { echo "::error::GITVERSE_REPO is missing"; exit 1; }
+
+      - name: Import GitVerse object graph into quarantined GitHub recovery refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
+          EXPECTED_GITVERSE_MAIN: ff8efb4186ebccca2c30cc78b8fefb5ec7cd0cf5
+          ACCEPTED_WINDOWS_PREFIX: b6ba4e0
+          ACCEPTED_WINDOWS_TAG: discount-parser-windows-recovery-hotfix-2026-08-16
+          ACCEPTED_INSTALLER_SHA256: E001979A77FF40F3C2FEF84594BE1C57B0C57979CDF331A3EE1D620AD4024509
+        run: |
+          set -euo pipefail
+
+          git clone --mirror \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPOSITORY}.git" \
+            repository.git
+          cd repository.git
+
+          git remote add gitverse \
+            "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/arvectum/${GITVERSE_REPOSITORY}.git"
+
+          # Import without pruning or rewriting any canonical GitHub ref. All
+          # GitVerse heads/tags first land in a private local namespace.
+          git fetch --no-tags gitverse \
+            '+refs/heads/*:refs/recovery/gitverse-heads/*' \
+            '+refs/tags/*:refs/recovery/gitverse-tags/*'
+
+          gv_main="$(git rev-parse refs/recovery/gitverse-heads/main)"
+          if [ "$gv_main" != "$EXPECTED_GITVERSE_MAIN" ]; then
+            echo "::error::GitVerse main changed: expected $EXPECTED_GITVERSE_MAIN, got $gv_main"
+            exit 1
+          fi
+
+          echo "### DP-REPO-002 recovery import" >> "$GITHUB_STEP_SUMMARY"
+          echo "- GitVerse main: \`$gv_main\` (expected/live verified)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- GitHub main before reconciliation: \`$(git rev-parse refs/heads/main)\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Accepted installer SHA-256 evidence: \`$ACCEPTED_INSTALLER_SHA256\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # Preserve every currently surviving GitVerse branch under a GitHub
+          # quarantine namespace. Existing recovery refs are immutable here:
+          # a mismatched target is a hard failure, never a force update.
+          echo "#### Imported GitVerse branch refs" >> "$GITHUB_STEP_SUMMARY"
+          while read -r ref; do
+            original="${ref#refs/recovery/gitverse-heads/}"
+            sha="$(git rev-parse "$ref")"
+            target="refs/heads/recovery/gitverse/${original}"
+            existing="$(git ls-remote origin "$target" | awk '{print $1}')"
+            if [ -n "$existing" ]; then
+              if [ "$existing" != "$sha" ]; then
+                echo "::error::Recovery ref $target already exists at $existing, expected $sha"
+                exit 1
+              fi
+            else
+              git push origin "$sha:$target"
+            fi
+            echo "- \`${original}\` → \`${sha}\` → \`${target#refs/heads/}\`" >> "$GITHUB_STEP_SUMMARY"
+          done < <(git for-each-ref --format='%(refname)' refs/recovery/gitverse-heads | sort)
+
+          # Preserve any GitVerse-only tag object under a quarantine tag name.
+          # If the same original tag already exists in GitHub, verify target
+          # equality and do not duplicate it.
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### GitVerse tag refs" >> "$GITHUB_STEP_SUMMARY"
+          while read -r ref; do
+            name="${ref#refs/recovery/gitverse-tags/}"
+            obj="$(git rev-parse "$ref")"
+            original_ref="refs/tags/${name}"
+            original_obj="$(git show-ref -s "$original_ref" 2>/dev/null || true)"
+            if [ -n "$original_obj" ]; then
+              if [ "$original_obj" != "$obj" ]; then
+                echo "::error::Tag mismatch for $name: GitHub=$original_obj GitVerse=$obj"
+                exit 1
+              fi
+              echo "- \`${name}\` → \`${obj}\` (already identical in GitHub)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              quarantine="refs/tags/recovery/gitverse/${name}"
+              existing="$(git ls-remote origin "$quarantine" | awk '{print $1}')"
+              if [ -n "$existing" ] && [ "$existing" != "$obj" ]; then
+                echo "::error::Quarantine tag $quarantine exists at $existing, expected $obj"
+                exit 1
+              fi
+              if [ -z "$existing" ]; then
+                git push origin "$obj:$quarantine"
+              fi
+              echo "- \`${name}\` → \`${obj}\` → \`${quarantine#refs/tags/}\` (quarantined)" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done < <(git for-each-ref --format='%(refname)' refs/recovery/gitverse-tags | sort)
+
+          # Recover the exact accepted Windows tag target from its operator-
+          # recorded prefix, but only when the prefix resolves uniquely inside
+          # the live-verified GitVerse main ancestry.
+          matches="$(git rev-list refs/recovery/gitverse-heads/main | grep "^${ACCEPTED_WINDOWS_PREFIX}" || true)"
+          match_count="$(printf '%s\n' "$matches" | sed '/^$/d' | wc -l | tr -d ' ')"
+          if [ "$match_count" != "1" ]; then
+            echo "::error::Accepted Windows prefix $ACCEPTED_WINDOWS_PREFIX resolved to $match_count commits in GitVerse main ancestry"
+            exit 1
+          fi
+          accepted_commit="$(printf '%s\n' "$matches" | head -n1)"
+          git merge-base --is-ancestor "$accepted_commit" refs/recovery/gitverse-heads/main
+
+          accepted_branch="refs/heads/recovery/accepted-windows-${ACCEPTED_WINDOWS_PREFIX}-20260816"
+          existing_branch="$(git ls-remote origin "$accepted_branch" | awk '{print $1}')"
+          if [ -n "$existing_branch" ] && [ "$existing_branch" != "$accepted_commit" ]; then
+            echo "::error::Accepted Windows recovery branch already points elsewhere"
+            exit 1
+          fi
+          if [ -z "$existing_branch" ]; then
+            git push origin "$accepted_commit:$accepted_branch"
+          fi
+
+          # Restore the deleted immutable Windows recovery tag at its verified
+          # original commit. Never move it if it already exists.
+          existing_tag="$(git ls-remote origin "refs/tags/${ACCEPTED_WINDOWS_TAG}" | awk '{print $1}')"
+          if [ -n "$existing_tag" ]; then
+            if [ "$existing_tag" != "$accepted_commit" ]; then
+              echo "::error::$ACCEPTED_WINDOWS_TAG exists at $existing_tag, expected $accepted_commit"
+              exit 1
+            fi
+          else
+            git push origin "$accepted_commit:refs/tags/${ACCEPTED_WINDOWS_TAG}"
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Accepted Windows lineage recovered" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Recorded tag: \`$ACCEPTED_WINDOWS_TAG\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Recorded prefix: \`$ACCEPTED_WINDOWS_PREFIX\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Exact recovered commit: \`$accepted_commit\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit is an ancestor of live-verified GitVerse main: **YES**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Restored immutable tag target: \`$accepted_commit\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Installer SHA-256 evidence: \`$ACCEPTED_INSTALLER_SHA256\`" >> "$GITHUB_STEP_SUMMARY"
+
+          # Record graph relationships for all product/recovery refs likely to
+          # carry post-R11 work. This is evidence only; no canonical ref moves.
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Graph reconciliation matrix against GitVerse main" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ref | tip | relation to GitVerse main | gv-only | ref-only | patch-unique in ref |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|---:|---:|---:|" >> "$GITHUB_STEP_SUMMARY"
+
+          while read -r ref; do
+            case "$ref" in
+              refs/heads/main|refs/heads/master|refs/heads/hotfix/*|refs/heads/fix/*|refs/heads/feature/*|refs/heads/recovery/*|refs/tags/r12*|refs/tags/discount-parser-*) ;;
+              *) continue ;;
+            esac
+            # Exclude the newly-created GitVerse quarantine copies from the
+            # matrix; the original local refs already represent those objects.
+            case "$ref" in
+              refs/heads/recovery/gitverse/*|refs/heads/recovery/accepted-windows-*|refs/tags/recovery/gitverse/*) continue ;;
+            esac
+
+            tip="$(git rev-parse "$ref^{commit}" 2>/dev/null || git rev-parse "$ref")"
+            gv_only="$(git rev-list --count "$tip..$gv_main")"
+            ref_only="$(git rev-list --count "$gv_main..$tip")"
+            if [ "$tip" = "$gv_main" ]; then
+              relation="equal"
+            elif git merge-base --is-ancestor "$tip" "$gv_main"; then
+              relation="ancestor"
+            elif git merge-base --is-ancestor "$gv_main" "$tip"; then
+              relation="descendant"
+            else
+              relation="diverged"
+            fi
+            patch_unique="$(git cherry "$gv_main" "$tip" 2>/dev/null | grep -c '^+' || true)"
+            label="${ref#refs/heads/}"
+            label="${label#refs/tags/}"
+            echo "| \`$label\` | \`$tip\` | $relation | $gv_only | $ref_only | $patch_unique |" >> "$GITHUB_STEP_SUMMARY"
+          done < <(git for-each-ref --format='%(refname)' refs/heads refs/tags | sort)
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Recovery import completed without changing GitHub main." >> "$GITHUB_STEP_SUMMARY"
