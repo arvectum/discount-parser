@@ -11,6 +11,7 @@ from alembic.config import Config
 from src.jobs.scheduler import run_scheduler
 from src.modules.source_registry.seed import seed_registry
 from src.qa.doctor import build_doctor_report
+from src.qa.support_bundle import build_support_bundle
 from src.shared.config import get_settings
 from src.shared.db import session_scope
 from src.telegram.runner import run_bot
@@ -50,6 +51,14 @@ def doctor() -> int:
     return 0 if report.ok else 1
 
 
+def support_bundle() -> int:
+    _prepare_runtime_directory()
+    output = sys.argv[2] if len(sys.argv) > 2 else None
+    destination = build_support_bundle(output)
+    print(str(destination))
+    return 0
+
+
 def main() -> int:
     _configure_console_encoding()
     _prepare_runtime_directory()
@@ -64,6 +73,8 @@ def main() -> int:
         return migrate()
     if command_name == 'doctor':
         return doctor()
+    if command_name == 'support-bundle':
+        return support_bundle()
     print(f'Unknown worker command: {command_name}', file=sys.stderr)
     return 2
 
