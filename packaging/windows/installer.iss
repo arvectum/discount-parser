@@ -67,9 +67,9 @@ begin
   TargetPath := ExpandConstant('{app}\{#MyAppExeName}');
   ShortcutPath := DesktopShortcutPath();
 
-  ; A successful upgrade/reinstall must not intentionally preserve a stale
-  ; product-owned shortcut. Failure to remove it is still non-fatal because
-  ; Desktop can be redirected, protected, synchronized, or temporarily locked.
+  // A successful upgrade/reinstall must not intentionally preserve a stale
+  // product-owned shortcut. Failure to remove it is still non-fatal because
+  // Desktop can be redirected, protected, synchronized, or temporarily locked.
   RemoveDesktopShortcutBestEffort();
 
   if not WizardIsTaskSelected('desktopicon') then
@@ -96,10 +96,10 @@ begin
       SW_SHOWNORMAL);
     Log('DP-WIN-P0.2: created desktop shortcut: ' + CreatedShortcut);
   except
-    ; CreateShellLink raises on shell/COM/ACL failures such as
-    ; IPersistFile::Save 0x80070005. The shortcut is convenience-only, so the
-    ; installed application and Start Menu entry remain valid and Setup must
-    ; not roll back the payload.
+    // CreateShellLink raises on shell/COM/ACL failures such as
+    // IPersistFile::Save 0x80070005. The shortcut is convenience-only, so the
+    // installed application and Start Menu entry remain valid and Setup must
+    // not roll back the payload.
     Log('DP-WIN-P0.2: warning: desktop shortcut creation failed; installation continues: ' + GetExceptionMessage);
   end;
 end;
