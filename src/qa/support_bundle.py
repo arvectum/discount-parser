@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from src.qa.doctor import build_doctor_report
+from src.qa.operational_status import build_operational_status
 from src.qa.report import build_smoke_report
 from src.shared.config import get_settings
 from src.shared.logging import redact_secrets
@@ -58,9 +59,6 @@ _SAFE_SETTING_NAMES = {
     "vk_api_version",
 }
 
-# Defense in depth beyond the normal logging redactor. The support bundle is a
-# user-shareable artifact, so URL credentials and common header/cookie forms
-# are removed even if they came from older logs created before redaction.
 _URL_CREDENTIALS = re.compile(r"(?i)(https?://)([^/@:\s]+):([^/@\s]+)@")
 _HEADER_SECRET = re.compile(
     r"(?i)\b(authorization|proxy-authorization|cookie|set-cookie|x-api-key)\s*[:=]\s*([^\r\n]+)"
@@ -98,10 +96,7 @@ def _configuration_summary() -> dict[str, Any]:
     settings = get_settings()
     model = settings.model_dump()
     safe = {name: model.get(name) for name in sorted(_SAFE_SETTING_NAMES)}
-    configured = {
-        name: bool(model.get(name))
-        for name in sorted(_SECRET_SETTING_NAMES)
-    }
+    configured = {name: bool(model.get(name)) for name in sorted(_SECRET_SETTING_NAMES)}
     safe["database_backend"] = "sqlite" if settings.database_url.startswith("sqlite:///") else "other"
     return {
         "safe_settings": safe,
@@ -129,7 +124,7 @@ def _runtime_metadata() -> dict[str, Any]:
 def _safe_doctor_report() -> dict[str, Any]:
     try:
         return build_doctor_report().to_dict()
-    except Exception as exc:  # support bundle must still explain startup failures
+    except Exception as exc:
         return {"ok": False, "error": sanitize_text(f"{type(exc).__name__}: {exc}")}
 
 
@@ -138,6 +133,13 @@ def _safe_smoke_report() -> dict[str, Any]:
         return build_smoke_report()
     except Exception as exc:
         return {"available": False, "error": sanitize_text(f"{type(exc).__name__}: {exc}")}
+
+
+def _safe_operational_status() -> dict[str, Any]:
+    try:
+        return build_operational_status()
+    except Exception as exc:
+        return {"state": "error", "error": sanitize_text(f"{type(exc).__name__}: {exc}")}
 
 
 def _read_log_tail(path: Path) -> bytes:
@@ -154,6 +156,7 @@ def _collect_payload() -> dict[str, bytes]:
     payload: dict[str, bytes] = {
         "diagnostics/runtime.json": _json_bytes(_runtime_metadata()),
         "diagnostics/configuration.json": _json_bytes(_configuration_summary()),
+        "diagnostics/operational-status.json": _json_bytes(_safe_operational_status()),
         "diagnostics/doctor.json": _json_bytes(_safe_doctor_report()),
         "diagnostics/smoke-report.json": _json_bytes(_safe_smoke_report()),
     }
@@ -174,11 +177,7 @@ def _manifest(payload: dict[str, bytes]) -> dict[str, Any]:
         "task": "DP-DIAG-001",
         "generated_at": datetime.now(UTC).isoformat(),
         "files": [
-            {
-                "path": name,
-                "size_bytes": len(data),
-                "sha256": _sha256_bytes(data),
-            }
+            {"path": name, "size_bytes": len(data), "sha256": _sha256_bytes(data)}
             for name, data in sorted(payload.items())
         ],
         "excluded_by_policy": [
@@ -204,8 +203,6 @@ def build_support_bundle(output: str | Path | None = None) -> Path:
     manifest = _manifest(payload)
     payload["manifest.json"] = _json_bytes(manifest)
 
-    # Write atomically so a failed collection/zip operation never leaves a
-    # half-valid archive that might be sent to support.
     with tempfile.NamedTemporaryFile(
         prefix=".discount-parser-support-",
         suffix=".zip",
