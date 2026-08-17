@@ -6,9 +6,10 @@ import threading
 from pathlib import Path
 
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from src.qa.doctor import build_doctor_report
+from src.qa.operational_status import build_operational_status
 from src.web.processes import process_log_path, process_manager, read_process_log
 from src.web.setup import is_setup_complete
 
@@ -48,6 +49,21 @@ def _doctor_html() -> str:
         rows.append(f'<div class="check"><b>{html.escape(check.name)}</b>{badge}<span>{html.escape(check.detail)}</span></div>')
     overall = '<span class="pill on">ГОТОВО К ЛОКАЛЬНОМУ ТЕСТУ</span>' if report.ok else '<span class="pill off">ЕСТЬ БЛОКИРУЮЩИЕ ОШИБКИ</span>'
     return f'<div class="card"><div class="row" style="justify-content:space-between"><h3>Самодиагностика</h3>{overall}</div>{"".join(rows)}</div>'
+
+
+@router.get('/system/status.json', response_class=JSONResponse)
+def system_status_json():
+    if not is_setup_complete():
+        return JSONResponse(
+            status_code=409,
+            content={
+                'schema_version': 1,
+                'state': 'warning',
+                'reasons': ['setup_incomplete'],
+                'setup_complete': False,
+            },
+        )
+    return JSONResponse(content=build_operational_status(process_states=process_manager.states()))
 
 
 @router.get('/system', response_class=HTMLResponse)
