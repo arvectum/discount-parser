@@ -1,0 +1,47 @@
+name: DP-REPO-002 GitVerse Deleted Ref Probe v2
+
+on:
+  push:
+    branches:
+      - recovery/dp-repo-002-import
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe GitVerse API
+        env:
+          GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
+        run: |
+          set -euo pipefail
+          test -n "$GITVERSE_TOKEN"
+          test -n "$GITVERSE_REPOSITORY"
+          api="https://api.gitverse.ru/repos/arvectum/${GITVERSE_REPOSITORY}"
+          tmp="$(mktemp)"
+          status="$(curl -sS -o "$tmp" -w '%{http_code}' -H "Authorization: Bearer ${GITVERSE_TOKEN}" -H 'Accept: application/vnd.gitverse.object+json;version=latest' "$api/commits/b6ba4e0" || true)"
+          echo "COMMIT_PREFIX_STATUS=$status"
+          if [ "$status" = "200" ]; then
+            sha="$(jq -r '.sha // .id // .commit_sha // "-"' "$tmp")"
+            msg="$(jq -r '(.commit.message // .message // "-") | split("\n")[0]' "$tmp")"
+            echo "COMMIT_PREFIX_FULL_SHA=$sha"
+            echo "COMMIT_PREFIX_MESSAGE=$msg"
+          else
+            echo "COMMIT_PREFIX_FULL_SHA=-"
+          fi
+
+          runs="$(mktemp)"
+          runs_status="$(curl -sS -o "$runs" -w '%{http_code}' -H "Authorization: Bearer ${GITVERSE_TOKEN}" -H 'Accept: application/vnd.gitverse.object+json;version=latest' "$api/actions/runs?per_page=50&page=1" || true)"
+          echo "ACTIONS_RUNS_STATUS=$runs_status"
+          if [ "$runs_status" = "200" ]; then
+            jq -r '
+              (.workflow_runs // .runs // .items // (if type=="array" then . else [] end))[] |
+              {sha:(.commit_sha // .head_sha // ""), ref:(.ref // .head_branch // ""), title:(.title // .name // ""), id:(.id // "-")} |
+              select((.sha|startswith("b6ba4e0")) or (.ref|ascii_downcase|contains("windows-recovery")) or (.title|ascii_downcase|contains("windows-recovery")) or (.ref|ascii_downcase|contains("telegram-hotfix"))) |
+              "MATCH_RUN|sha=\(.sha)|ref=\(.ref)|title=\(.title)|id=\(.id)"
+            ' "$runs" || true
+          fi
