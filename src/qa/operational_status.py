@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any, Mapping
 
@@ -13,6 +13,17 @@ from src.shared.logging import redact_secrets
 
 STATUS_SCHEMA_VERSION = 1
 
+_URL_CREDENTIALS = re.compile(r"(?i)(https?://)([^/@:\s]+):([^/@\s]+)@")
+_HEADER_SECRET = re.compile(
+    r"(?i)\b(authorization|proxy-authorization|cookie|set-cookie|x-api-key)\s*[:=]\s*([^\r\n]+)"
+)
+_GENERIC_SECRET = re.compile(
+    r"(?i)\b(token|password|passwd|secret|api[_-]?key|api[_-]?hash|session)\s*[:=]\s*['\"]?([^'\"\s,;]+)"
+)
+_ID_CREDENTIAL = re.compile(
+    r"(?i)\b(telegram_(?:channel_id|admin_ids)|admin[_-]?id|channel[_-]?id)\s*[:=]\s*['\"]?([^'\"\s,;]+)"
+)
+
 
 def _iso(value: datetime | None) -> str | None:
     if value is None:
@@ -23,7 +34,14 @@ def _iso(value: datetime | None) -> str | None:
 
 
 def _sanitize(value: str | None) -> str | None:
-    return redact_secrets(value) if value else None
+    if not value:
+        return None
+    clean = redact_secrets(value)
+    clean = _URL_CREDENTIALS.sub(r"\1***REDACTED***:***REDACTED***@", clean)
+    clean = _HEADER_SECRET.sub(r"\1: ***REDACTED***", clean)
+    clean = _GENERIC_SECRET.sub(r"\1=***REDACTED***", clean)
+    clean = _ID_CREDENTIAL.sub(r"\1=***REDACTED***", clean)
+    return clean
 
 
 def _source_snapshot(
@@ -110,8 +128,6 @@ def build_operational_status(
         current = current.replace(tzinfo=UTC)
     current = current.astimezone(UTC)
     settings = get_settings()
-    # Three expected collection intervals, with a six-hour minimum, avoids
-    # declaring a source stale because of one delayed cycle.
     stale_after = max(
         timedelta(minutes=max(1, settings.collect_interval_minutes) * 3),
         timedelta(hours=6),
@@ -142,8 +158,6 @@ def build_operational_status(
         processes.setdefault(name, {"observed": False, "running": None, "pid": None})
 
     aggregates = smoke_report if smoke_report is not None else build_smoke_report()
-    # Only retain stable aggregate fields. `source_statuses` and publication
-    # identifiers belong to other diagnostics and are intentionally excluded.
     aggregate_allowlist = (
         "sources",
         "offers_total",
