@@ -122,24 +122,51 @@ function Assert-InstalledPayload([string]$InstallDir) {
     }
 }
 
-function Assert-ShortcutTarget([string]$ShortcutPath, [string]$ExpectedTarget, [string]$ExpectedWorkingDir) {
+function Stop-DiscountParserProcesses {
+    Get-Process -Name "DiscountParser" -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+}
+
+function Assert-ShortcutLaunchesTarget([string]$ShortcutPath, [string]$ExpectedTarget) {
     if (-not (Test-Path -LiteralPath $ShortcutPath -PathType Leaf)) {
         throw "Expected shortcut is missing: $ShortcutPath"
     }
 
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($ShortcutPath)
-    $actualTarget = [System.IO.Path]::GetFullPath([string]$shortcut.TargetPath)
-    $actualWorkingDir = [System.IO.Path]::GetFullPath([string]$shortcut.WorkingDirectory)
+    # WScript.Shell's Shortcut.TargetPath adapter on the hosted runner degrades
+    # non-ASCII path text to question marks even when the actual .lnk is valid.
+    # Exercise the shortcut through the Windows shell instead and prove that the
+    # process that starts is the expected Unicode-path DiscountParser.exe.
     $expectedTargetFull = [System.IO.Path]::GetFullPath($ExpectedTarget)
-    $expectedWorkingFull = [System.IO.Path]::GetFullPath($ExpectedWorkingDir)
+    Stop-DiscountParserProcesses
+    Start-Process -FilePath $ShortcutPath | Out-Null
 
-    if (-not [string]::Equals($actualTarget, $expectedTargetFull, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Shortcut target mismatch: $ShortcutPath -> $actualTarget (expected $expectedTargetFull)"
+    $deadline = (Get-Date).AddSeconds(20)
+    $matched = $null
+    $lastObserved = @()
+    while ((Get-Date) -lt $deadline -and -not $matched) {
+        $lastObserved = @(
+            Get-CimInstance Win32_Process -Filter "Name = 'DiscountParser.exe'" -ErrorAction SilentlyContinue
+        )
+        foreach ($process in $lastObserved) {
+            if (-not $process.ExecutablePath) { continue }
+            $actualTarget = [System.IO.Path]::GetFullPath([string]$process.ExecutablePath)
+            if ([string]::Equals($actualTarget, $expectedTargetFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $matched = $process
+                break
+            }
+        }
+        if (-not $matched) { Start-Sleep -Milliseconds 500 }
     }
-    if (-not [string]::Equals($actualWorkingDir.TrimEnd('\'), $expectedWorkingFull.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Shortcut working directory mismatch: $ShortcutPath -> $actualWorkingDir (expected $expectedWorkingFull)"
+
+    if (-not $matched) {
+        $observedPaths = @($lastObserved | ForEach-Object { $_.ExecutablePath }) -join '; '
+        Stop-DiscountParserProcesses
+        throw "Shortcut did not launch expected target: $ShortcutPath -> expected $expectedTargetFull; observed: $observedPaths"
     }
+
+    Stop-Process -Id $matched.ProcessId -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 300
+    Stop-DiscountParserProcesses
 }
 
 $UnicodeInstallDir = Join-Path $env:RUNNER_TEMP "Пользователь-Анастасия\AppData\Local\DiscountParser"
@@ -148,7 +175,7 @@ $Evidence.scenarios.unicode_reinstall_cycle.install_directory = $UnicodeInstallD
 $Evidence.scenarios.blocked_desktop_shortcut.install_directory = $BlockedInstallDir
 
 try {
-    # Scenario 1: Unicode path + desktop/start-menu target validation + reinstall
+    # Scenario 1: Unicode path + desktop/start-menu launch validation + reinstall
     # + uninstall + reinstall after uninstall. This models a Cyrillic user-profile
     # component without requiring the hosted runner account itself to be renamed.
     Remove-ShortcutCollision
@@ -163,9 +190,9 @@ try {
     Assert-InstalledPayload $UnicodeInstallDir
 
     $unicodeExe = Join-Path $UnicodeInstallDir "DiscountParser.exe"
-    Assert-ShortcutTarget $DesktopShortcut $unicodeExe $UnicodeInstallDir
+    Assert-ShortcutLaunchesTarget $DesktopShortcut $unicodeExe
     $Evidence.scenarios.unicode_reinstall_cycle.desktop_shortcut_valid = $true
-    Assert-ShortcutTarget $StartMenuShortcut $unicodeExe $UnicodeInstallDir
+    Assert-ShortcutLaunchesTarget $StartMenuShortcut $unicodeExe
     $Evidence.scenarios.unicode_reinstall_cycle.start_menu_shortcut_valid = $true
 
     $reinstallLog = Join-Path $LogDir "unicode-reinstall.log"
@@ -173,8 +200,8 @@ try {
     $Evidence.scenarios.unicode_reinstall_cycle.reinstall_exit_code = $reinstallExit
     if ($reinstallExit -ne 0) { throw "In-place reinstall failed with exit code $reinstallExit" }
     Assert-InstalledPayload $UnicodeInstallDir
-    Assert-ShortcutTarget $DesktopShortcut $unicodeExe $UnicodeInstallDir
-    Assert-ShortcutTarget $StartMenuShortcut $unicodeExe $UnicodeInstallDir
+    Assert-ShortcutLaunchesTarget $DesktopShortcut $unicodeExe
+    Assert-ShortcutLaunchesTarget $StartMenuShortcut $unicodeExe
 
     $firstUninstallLog = Join-Path $LogDir "unicode-uninstall.log"
     $firstUninstallExit = Invoke-Uninstaller $UnicodeInstallDir $firstUninstallLog
@@ -190,8 +217,8 @@ try {
     $Evidence.scenarios.unicode_reinstall_cycle.post_uninstall_reinstall_exit_code = $postUninstallExit
     if ($postUninstallExit -ne 0) { throw "Reinstall after uninstall failed with exit code $postUninstallExit" }
     Assert-InstalledPayload $UnicodeInstallDir
-    Assert-ShortcutTarget $DesktopShortcut $unicodeExe $UnicodeInstallDir
-    Assert-ShortcutTarget $StartMenuShortcut $unicodeExe $UnicodeInstallDir
+    Assert-ShortcutLaunchesTarget $DesktopShortcut $unicodeExe
+    Assert-ShortcutLaunchesTarget $StartMenuShortcut $unicodeExe
 
     $finalUninstallLog = Join-Path $LogDir "unicode-final-uninstall.log"
     $finalUninstallExit = Invoke-Uninstaller $UnicodeInstallDir $finalUninstallLog
@@ -227,7 +254,7 @@ try {
     $Evidence.scenarios.blocked_desktop_shortcut.desktop_failure_nonfatal = $true
 
     $blockedExe = Join-Path $BlockedInstallDir "DiscountParser.exe"
-    Assert-ShortcutTarget $StartMenuShortcut $blockedExe $BlockedInstallDir
+    Assert-ShortcutLaunchesTarget $StartMenuShortcut $blockedExe
     $Evidence.scenarios.blocked_desktop_shortcut.start_menu_shortcut_valid = $true
 
     # Remove only the synthetic test blocker before uninstall; production
@@ -251,6 +278,7 @@ catch {
     throw
 }
 finally {
+    Stop-DiscountParserProcesses
     if (Test-Path -LiteralPath $DesktopShortcut -PathType Container) {
         Remove-Item -LiteralPath $DesktopShortcut -Recurse -Force -ErrorAction SilentlyContinue
     }
