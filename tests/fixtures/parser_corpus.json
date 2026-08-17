@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "adapter": "berikod",
+      "fixture": "berikod.html",
+      "base_url": "https://berikod.ru/",
+      "expected_count": 2,
+      "offers": [
+        {"title_contains": "смартфоны Samsung", "promo_code": "MTS55", "discount_amount": "5000"},
+        {"title_contains": "Ламода", "promo_code": "ERNOW", "discount_percent": "20"}
+      ]
+    },
+    {
+      "adapter": "promko",
+      "fixture": "promko.html",
+      "base_url": "https://promko.net/ru/",
+      "expected_count": 3,
+      "offers": [
+        {"merchant": "Яндекс Плюс", "discount_percent": "100"},
+        {"merchant": "Askona", "discount_percent": "99"},
+        {"merchant": "Aravia", "discount_percent": "70"}
+      ]
+    },
+    {
+      "adapter": "promokodi_net_ru",
+      "fixture": "promokodi_net_ru.html",
+      "base_url": "https://promokodi.net.ru/",
+      "expected_count": 2,
+      "offers": [
+        {"merchant": "Мвидео", "title_contains": "Подарочные сертификаты", "discount_percent": "25"},
+        {"merchant": "Детский мир", "title_contains": "Скидка 15%", "discount_percent": "15"}
+      ]
+    },
+    {
+      "adapter": "promokodik",
+      "fixture": "promokodik.html",
+      "base_url": "https://promokodik.ru/",
+      "expected_count": 2,
+      "offers": [
+        {"merchant": "Детский мир", "title_contains": "Скидка 20%", "discount_percent": "20", "external_id": "101"},
+        {"merchant": "Аптека", "title_contains": "Кешбэк 12%", "cashback_percent": "12", "external_id": "102"}
+      ]
+    },
+    {
+      "adapter": "promokood",
+      "fixture": "promokood.html",
+      "base_url": "https://promokood.ru/",
+      "expected_count": 3,
+      "offers": [
+        {"merchant": "ВкусВилл", "discount_amount": "200"},
+        {"merchant": "Яндекс Афиша", "discount_amount": "300"},
+        {"merchant": "Горздрав", "discount_percent": "10"}
+      ]
+    }
+  ]
+}
