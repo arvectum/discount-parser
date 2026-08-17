@@ -136,10 +136,178 @@ jobs:
           path: delivery
           if-no-files-found: error
 
+  release-source-gate:
+    name: release gate / exact main + canonical CI
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require exact current main source and unused release tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "Release tag must match vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease" >&2
+            exit 1
+          fi
+          git fetch origin main --no-tags
+          test "$(git rev-list -n 1 "$TAG")" = "$GITHUB_SHA"
+          if [[ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]]; then
+            echo "Release tag must point to the exact current canonical origin/main HEAD" >&2
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to replace or mutate it" >&2
+            exit 1
+          fi
+
+      - name: Require successful canonical CI for exact release commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p gate-output
+          gh api -H "Accept: application/vnd.github+json" \
+            "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&event=push&per_page=100" \
+            > gate-output/ci-runs.json
+          python scripts/release_gate.py ci \
+            --runs-json gate-output/ci-runs.json \
+            --commit "$GITHUB_SHA" \
+            --repository "$GITHUB_REPOSITORY" \
+            --output gate-output/release-gate-ci.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-ci
+          path: gate-output/release-gate-ci.json
+          if-no-files-found: error
+
+  release-repro-gate:
+    name: release gate / Windows byte reproducibility
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build, release-source-gate]
+    runs-on: windows-2025
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: discount-parser-windows-x64
+          path: primary
+
+      - name: Read controlled build manifest
+        id: manifest
+        shell: pwsh
+        run: |
+          $manifest = Get-Content packaging/windows/build-manifest.json -Raw | ConvertFrom-Json
+          "python_version=$($manifest.python_version)" >> $env:GITHUB_OUTPUT
+          "pip_version=$($manifest.pip_version)" >> $env:GITHUB_OUTPUT
+          "inno_version=$($manifest.inno_setup_version)" >> $env:GITHUB_OUTPUT
+          "python_hash_seed=$($manifest.python_hash_seed)" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.manifest.outputs.python_version }}
+          cache: pip
+          cache-dependency-path: requirements/windows-build.lock
+
+      - name: Rebuild exact source independently
+        shell: pwsh
+        run: |
+          $epoch = (& git show -s --format=%ct HEAD).Trim()
+          "PYTHONHASHSEED=${{ steps.manifest.outputs.python_hash_seed }}" >> $env:GITHUB_ENV
+          "SOURCE_DATE_EPOCH=$epoch" >> $env:GITHUB_ENV
+          python -m pip install --upgrade "pip==${{ steps.manifest.outputs.pip_version }}"
+          python -m pip install --no-deps --only-binary=:all: -r requirements/windows-build.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+          python -m pip check
+          ./scripts/ensure_inno_setup.ps1 -Version "${{ steps.manifest.outputs.inno_version }}"
+          ./scripts/build_windows_ci.ps1
+
+      - name: Bind release installer to independent replica
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force gate-output | Out-Null
+          python scripts/release_gate.py repro `
+            --primary primary/DiscountParser-Setup.exe `
+            --replica delivery/DiscountParser-Setup.exe `
+            --primary-provenance primary/windows-build-provenance.json `
+            --replica-provenance delivery/windows-build-provenance.json `
+            --commit $env:GITHUB_SHA `
+            --output gate-output/release-gate-repro.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-repro
+          path: gate-output/release-gate-repro.json
+          if-no-files-found: error
+
+  release-installed-gate:
+    name: release gate / install exact Windows artifact
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build, release-source-gate]
+    runs-on: windows-2025
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: discount-parser-windows-x64
+          path: primary
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+
+      - name: Install and exercise exact release installer
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP "discount-parser-release-installed"
+          $rawEvidence = Join-Path $env:RUNNER_TEMP "dp-ci-003-installed\installed-acceptance.json"
+          ./scripts/windows_installed_acceptance.ps1 `
+            -InstallerPath "primary\DiscountParser-Setup.exe" `
+            -InstallDir $installDir `
+            -EvidenceOutput $rawEvidence `
+            -WebPort 18766
+          New-Item -ItemType Directory -Force gate-output | Out-Null
+          python scripts/release_gate.py installed `
+            --evidence $rawEvidence `
+            --installer "primary\DiscountParser-Setup.exe" `
+            --commit $env:GITHUB_SHA `
+            --output gate-output/release-gate-installed.json
+
+      - name: Upload installed release gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-installed
+          path: |
+            gate-output/release-gate-installed.json
+            ${{ runner.temp }}/dp-ci-003-installed/**
+          if-no-files-found: warn
+
   release:
     name: immutable release provenance
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, release-source-gate, release-repro-gate, release-installed-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -152,39 +320,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate canonical release tag and ancestry
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
-            echo "Release tag must match vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease" >&2
-            exit 1
-          fi
-          git fetch origin main --no-tags
-          release_commit="$(git rev-list -n 1 "$TAG")"
-          if [[ "$release_commit" != "$GITHUB_SHA" ]]; then
-            echo "Tag target $release_commit does not equal workflow SHA $GITHUB_SHA" >&2
-            exit 1
-          fi
-          if ! git merge-base --is-ancestor "$release_commit" origin/main; then
-            echo "Release commit must be reachable from canonical origin/main" >&2
-            exit 1
-          fi
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; refusing to replace or mutate it" >&2
-            exit 1
-          fi
-
       - name: Download exact build outputs
         uses: actions/download-artifact@v4
         with:
           pattern: discount-parser-*
           path: release-input
 
-      - name: Package artifacts and generate provenance manifest
+      - name: Download completed release gate evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-gate-*
+          path: release-gate-input
+
+      - name: Package artifacts and bind release gate evidence
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
@@ -196,10 +344,13 @@ jobs:
             name="$(basename "$dir")"
             (cd "$dir" && zip -q -r "$GITHUB_WORKSPACE/release/${name}.zip" .)
           done
-          (
-            cd release
-            sha256sum discount-parser-*.zip | sort -k2 > SHA256SUMS
-          )
+          python scripts/release_gate.py bundle \
+            --ci release-gate-input/release-gate-ci/release-gate-ci.json \
+            --repro release-gate-input/release-gate-repro/release-gate-repro.json \
+            --installed release-gate-input/release-gate-installed/gate-output/release-gate-installed.json \
+            --commit "$GITHUB_SHA" \
+            --tag "$TAG" \
+            --output release/release-gate.json
           python scripts/release_provenance.py \
             --artifact-dir release \
             --tag "$TAG" \
@@ -210,16 +361,20 @@ jobs:
             --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --server-url "$GITHUB_SERVER_URL" \
             --output release/release-provenance.json
+          (
+            cd release
+            sha256sum discount-parser-*.zip release-gate.json release-provenance.json | sort -k2 > SHA256SUMS
+          )
           cat > release/RELEASE_NOTES.md <<EOF
           Automated Discount Parser release $TAG.
 
           Source commit: $GITHUB_SHA
           Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
 
-          Verify file digests with SHA256SUMS and GitHub artifact attestations before installation.
+          Publication was gated by canonical CI, independent Windows byte reproducibility, and real installed Windows acceptance of the exact release installer. Verify SHA256SUMS and GitHub artifact attestations before installation.
           EOF
 
-      - name: Validate manifest against release payload
+      - name: Validate release payload
         shell: bash
         run: |
           set -euo pipefail
@@ -228,13 +383,14 @@ jobs:
             --artifact-dir release
           (cd release && sha256sum -c SHA256SUMS)
 
-      - name: Attest release payload
+      - name: Attest release payload and gate evidence
         uses: actions/attest@v4
         with:
           subject-path: |
             release/discount-parser-*.zip
             release/SHA256SUMS
             release/release-provenance.json
+            release/release-gate.json
 
       - name: Create complete draft release
         shell: bash
@@ -251,7 +407,8 @@ jobs:
             --notes-file release/RELEASE_NOTES.md \
             release/discount-parser-*.zip \
             release/SHA256SUMS \
-            release/release-provenance.json
+            release/release-provenance.json \
+            release/release-gate.json
 
       - name: Publish release after all assets are attached
         shell: bash
@@ -262,7 +419,7 @@ jobs:
           set -euo pipefail
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
 
-      - name: Verify published release binds tag and assets
+      - name: Verify published release binds tag, payload and gate evidence
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -272,7 +429,7 @@ jobs:
           release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
           test "$(jq -r '.tag_name' <<<"$release_json")" = "$TAG"
           test "$(jq -r '.draft' <<<"$release_json")" = "false"
-          for asset in release/discount-parser-*.zip release/SHA256SUMS release/release-provenance.json; do
+          for asset in release/discount-parser-*.zip release/SHA256SUMS release/release-provenance.json release/release-gate.json; do
             name="$(basename "$asset")"
             jq -e --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release_json" >/dev/null
           done
