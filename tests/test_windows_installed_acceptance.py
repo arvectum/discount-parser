@@ -34,6 +34,15 @@ def test_silent_installer_does_not_autolaunch_gui() -> None:
     assert 'postinstall skipifsilent' in installer
 
 
+def test_installed_harness_waits_for_gui_subsystem_installers() -> None:
+    harness = HARNESS.read_text(encoding='utf-8')
+    assert '$InstallProcess = Start-Process -FilePath $InstallerPath' in harness
+    assert '$UninstallProcess = Start-Process -FilePath $Uninstaller.FullName' in harness
+    assert harness.count('-Wait -PassThru') >= 2
+    assert '$InstallExit = $InstallProcess.ExitCode' in harness
+    assert '$UninstallExit = $UninstallProcess.ExitCode' in harness
+
+
 def test_installed_harness_exercises_runtime_not_staging_directory() -> None:
     harness = HARNESS.read_text(encoding='utf-8')
     required = [
