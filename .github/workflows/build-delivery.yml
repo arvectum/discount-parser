@@ -76,23 +76,7 @@ jobs:
         shell: pwsh
         run: |
           $manifest = Get-Content packaging/windows/build-manifest.json -Raw | ConvertFrom-Json
-          $expected = [string]$manifest.inno_setup_version
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          $needsInstall = $true
-          if (Test-Path $iscc) {
-            $raw = (Get-Item $iscc).VersionInfo.ProductVersion
-            if ($raw -match '(\d+\.\d+\.\d+)' -and $Matches[1] -eq $expected) {
-              $needsInstall = $false
-            }
-          }
-          if ($needsInstall) {
-            choco install innosetup --version=$expected --allow-downgrade --force -y --no-progress
-            if ($LASTEXITCODE -ne 0) { throw "Unable to install Inno Setup $expected" }
-          }
-          $raw = (Get-Item $iscc).VersionInfo.ProductVersion
-          if ($raw -notmatch '(\d+\.\d+\.\d+)' -or $Matches[1] -ne $expected) {
-            throw "Inno Setup version is not controlled: expected $expected, got $raw"
-          }
+          ./scripts/ensure_inno_setup.ps1 -Version ([string]$manifest.inno_setup_version)
 
       - name: Build controlled Windows delivery
         if: runner.os == 'Windows'
