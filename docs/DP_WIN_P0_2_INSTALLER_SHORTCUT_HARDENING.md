@@ -1,8 +1,9 @@
 # DP-WIN-P0.2 — Installer shortcut/rollback hardening
 
 **Priority:** P0 — customer-blocking Windows delivery defect  
-**Status:** IMPLEMENTED — native Windows CI acceptance required before merge  
-**Customer evidence:** feedback #3, 2026-08-17
+**Status:** COMPLETE — merged to canonical `main` on 2026-08-17  
+**Customer evidence:** feedback #3, 2026-08-17  
+**Canonical merge:** `4fa6eb03e4bcdd39e3a4db8e9c45378552c07541`
 
 ## Problem
 
@@ -28,7 +29,7 @@ The second screenshot is consistent with an interrupted/rolled-back or otherwise
 - the manually-created Desktop `.lnk` is explicitly removed by `[UninstallDelete]`;
 - no wildcard or broad Desktop cleanup is used.
 
-This directly covers the customer failure boundary because Inno Setup documents `CreateShellLink` as raising an exception when shortcut creation fails. The installer catches that exception instead of allowing it to abort Setup.
+This directly covers the customer failure boundary because a shortcut-creation exception is now handled inside the installer code instead of being allowed to abort Setup.
 
 ## Native Windows regression gate
 
@@ -49,11 +50,11 @@ The application is installed under a path containing Cyrillic components (`По�
 7. reinstall after uninstall succeeds and recreates working shortcuts;
 8. final uninstall succeeds.
 
-The gate deliberately validates shortcuts by launching them and observing the resulting Windows process path instead of relying on the `WScript.Shell` shortcut-property adapter, which can degrade non-ASCII path text on the hosted runner. This does not rename the GitHub-hosted Windows account, but it exercises the same Unicode filesystem, shell-link and process-launch APIs implicated by a Cyrillic user profile.
+The gate deliberately validates shortcuts by launching them and observing the resulting Windows process path instead of relying on the `WScript.Shell` shortcut-property adapter, which can degrade non-ASCII path text on the hosted runner. This does not rename the GitHub-hosted Windows account, but it exercises the Unicode filesystem, shell-link and process-launch path used by the installer.
 
 ### Scenario B — forced Desktop shortcut-save failure
 
-The gate deliberately occupies the exact Desktop `Discount Parser.lnk` pathname with a directory before Setup starts. This forces the Inno `CreateShellLink` call to raise through the same exception boundary as a shell/ACL save failure.
+The gate deliberately occupies the exact Desktop `Discount Parser.lnk` pathname with a directory before Setup starts. This forces the `CreateShellLink` exception boundary used by the best-effort Desktop shortcut implementation.
 
 Acceptance requires all of the following simultaneously:
 
@@ -63,7 +64,39 @@ Acceptance requires all of the following simultaneously:
 - the Start Menu shortcut still launches the installed `DiscountParser.exe` from the expected install directory;
 - uninstall succeeds after the synthetic blocker is removed.
 
-The test does not depend on the exact HRESULT produced by the synthetic collision; the contract being tested is that **any** `CreateShellLink` exception, including customer `0x80070005`, is non-fatal.
+The test does not depend on one particular HRESULT. The contract being tested is that a Desktop `CreateShellLink` failure is non-fatal to the application payload.
+
+## Acceptance evidence
+
+PR #20 was accepted on merge candidate `8115ef2e3fd6a498a9786519a3fa7b502943c641` with branch head `f4283e79043104dd1c4a3a21771fe2aa8811cd69`.
+
+Required workflows all passed before merge:
+
+- normal CI — PASS;
+- `build-delivery` — PASS;
+- Windows reproducibility — PASS;
+- Windows installed acceptance — PASS;
+- DP-WIN-P0.2 installer resilience — PASS.
+
+The machine-readable resilience artifact from Windows installed acceptance run `32044762853` reported:
+
+- overall `status`: `PASS`;
+- tested installer SHA-256: `d5c5cb9340d67d340a2991a9433272247521d6649ded83a63ec362296e1b87f1`;
+- `unicode_reinstall_cycle.status`: `PASS`;
+- Unicode install path: `...\Пользователь-Анастасия\AppData\Local\DiscountParser`;
+- initial install, in-place reinstall, uninstall, reinstall-after-uninstall and final uninstall: exit code `0`;
+- Desktop shortcut launch: valid;
+- Start Menu shortcut launch: valid;
+- Desktop shortcut removed on uninstall: true;
+- `blocked_desktop_shortcut.status`: `PASS`;
+- forced Desktop failure observed: true;
+- Setup exit code under forced failure: `0`;
+- installed payload present after the forced failure: true;
+- Start Menu launch path remained valid: true;
+- forced Desktop failure classified non-fatal: true;
+- scenario uninstall exit code: `0`.
+
+PR #20 was then merged to canonical `main` as `4fa6eb03e4bcdd39e3a4db8e9c45378552c07541`.
 
 ## Regression protection
 
@@ -75,17 +108,17 @@ The test does not depend on the exact HRESULT produced by the synthetic collisio
 - the resilience harness actually launches shortcuts and binds the observed `DiscountParser.exe` process to the expected install path;
 - the Windows workflow actually executes and uploads evidence from the resilience gate.
 
-Existing DP-CI-001 reproducibility and DP-CI-002 installed runtime acceptance continue to run for the same pull request.
+Existing DP-CI-001 reproducibility and DP-CI-002 installed runtime acceptance continue to protect the installer.
 
 ## Definition of done
 
-DP-WIN-P0.2 becomes COMPLETE when:
+All DP-WIN-P0.2 engineering criteria are satisfied:
 
-1. normal CI passes;
-2. reproducible Windows build gate passes;
-3. installed Windows acceptance passes;
-4. DP-WIN-P0.2 resilience evidence reports `PASS` for both scenarios;
-5. the hotfix is merged to canonical `main`;
-6. the hardening roadmap is updated from P0 IN PROGRESS to COMPLETE.
+1. normal CI passed;
+2. reproducible Windows build gate passed;
+3. installed Windows acceptance passed;
+4. DP-WIN-P0.2 resilience evidence reported `PASS` for both scenarios;
+5. the hotfix was merged to canonical `main`;
+6. the hardening roadmap marks DP-WIN-P0.2 COMPLETE.
 
-A new physical customer-machine install is the later **DP-WIN-001** acceptance gate, not a prerequisite for merging this deterministic installer fix.
+A new physical customer-machine install remains the later **DP-WIN-001** acceptance gate. It is not a prerequisite for the completed deterministic installer fix.
