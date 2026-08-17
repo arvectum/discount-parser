@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import zipfile
 from pathlib import Path
 
@@ -126,3 +127,15 @@ def test_support_bundle_does_not_follow_unlisted_files(tmp_path: Path, monkeypat
         assert 'logs/app.log' in names
 
     get_settings.cache_clear()
+
+
+def test_worker_support_bundle_command_returns_zero_and_writes_zip(tmp_path: Path, monkeypatch, capsys) -> None:
+    from src import worker_entry
+
+    destination = tmp_path / 'worker-support.zip'
+    monkeypatch.setattr(worker_entry, '_prepare_runtime_directory', lambda: tmp_path)
+    monkeypatch.setattr(worker_entry, 'build_support_bundle', lambda output=None: destination)
+    monkeypatch.setattr(sys, 'argv', ['DiscountParserWorker.exe', 'support-bundle', str(destination)])
+
+    assert worker_entry.main() == 0
+    assert capsys.readouterr().out.strip() == str(destination)
