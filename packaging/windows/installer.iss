@@ -2,6 +2,7 @@
 #define MyAppVersion "0.1.0"
 #define MyAppExeName "DiscountParser.exe"
 #define MyWorkerExeName "DiscountParserWorker.exe"
+#define MyDesktopShortcutName "Discount Parser.lnk"
 
 [Setup]
 AppId={{E9D2A6B6-4F2B-4C7A-90EE-44C33AC43FD2}
@@ -27,28 +28,86 @@ RestartApplications=yes
 ; must not change the installer bytes between otherwise identical builds.
 Source: "..\..\delivery\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs notimestamp
 
+[Tasks]
+; DP-WIN-P0.2: the Desktop shortcut is optional. It is created from [Code]
+; so a shell/ACL failure cannot roll back an otherwise valid per-user install.
+Name: "desktopicon"; Description: "Создать ярлык на рабочем столе"; GroupDescription: "Дополнительные ярлыки:"
+
 [Icons]
-Name: "{autodesktop}\Discount Parser"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
+; Keep the primary launch path installer-managed and independent from Desktop.
 Name: "{group}\Discount Parser"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
 
 [Code]
-procedure CurStepChanged(CurStep: TSetupStep);
-var
-  Res: Integer;
+function DesktopShortcutPath(): String;
 begin
-  if CurStep = ssPostInstall then
+  Result := ExpandConstant('{userdesktop}\{#MyDesktopShortcutName}');
+end;
+
+procedure RemoveDesktopShortcutBestEffort();
+var
+  ShortcutPath: String;
+begin
+  ShortcutPath := DesktopShortcutPath();
+
+  if FileExists(ShortcutPath) then
   begin
-    // Attempt to create the shortcut via shell if Inno's [Icons] fails in some environments.
-    // However, Inno's [Icons] is usually best-effort unless specified otherwise.
-    // The customer error 0x80070005 (Access Denied) on IPersistFile::Save suggests
-    // a locking or permission issue on the .lnk file itself.
+    if DeleteFile(ShortcutPath) then
+      Log('DP-WIN-P0.2: removed existing Discount Parser desktop shortcut')
+    else
+      Log('DP-WIN-P0.2: warning: could not remove existing desktop shortcut; continuing installation');
   end;
 end;
 
-// Make desktop icon optional and non-fatal
-function InitializeSetup(): Boolean;
+procedure CreateDesktopShortcutBestEffort();
+var
+  TargetPath: String;
+  ShortcutPath: String;
+  CreatedShortcut: String;
 begin
-  Result := True;
+  TargetPath := ExpandConstant('{app}\{#MyAppExeName}');
+  ShortcutPath := DesktopShortcutPath();
+
+  ; A successful upgrade/reinstall must not intentionally preserve a stale
+  ; product-owned shortcut. Failure to remove it is still non-fatal because
+  ; Desktop can be redirected, protected, synchronized, or temporarily locked.
+  RemoveDesktopShortcutBestEffort();
+
+  if not WizardIsTaskSelected('desktopicon') then
+  begin
+    Log('DP-WIN-P0.2: desktop shortcut task not selected');
+    Exit;
+  end;
+
+  if not FileExists(TargetPath) then
+  begin
+    Log('DP-WIN-P0.2: desktop shortcut skipped because installed executable is missing: ' + TargetPath);
+    Exit;
+  end;
+
+  try
+    CreatedShortcut := CreateShellLink(
+      ShortcutPath,
+      '{#MyAppName}',
+      TargetPath,
+      '',
+      ExpandConstant('{app}'),
+      '',
+      0,
+      SW_SHOWNORMAL);
+    Log('DP-WIN-P0.2: created desktop shortcut: ' + CreatedShortcut);
+  except
+    ; CreateShellLink raises on shell/COM/ACL failures such as
+    ; IPersistFile::Save 0x80070005. The shortcut is convenience-only, so the
+    ; installed application and Start Menu entry remain valid and Setup must
+    ; not roll back the payload.
+    Log('DP-WIN-P0.2: warning: desktop shortcut creation failed; installation continues: ' + GetExceptionMessage);
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    CreateDesktopShortcutBestEffort();
 end;
 
 [Run]
@@ -56,4 +115,8 @@ Filename: "{app}\{#MyWorkerExeName}"; Parameters: "migrate"; WorkingDir: "{app}"
 Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Description: "Открыть Discount Parser"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
+; Desktop link is created manually from [Code], therefore it is explicitly
+; owned and removed here. `files` intentionally does not remove a directory
+; that merely collides with the .lnk name (used by the resilience gate).
+Type: files; Name: "{userdesktop}\{#MyDesktopShortcutName}"
 Type: filesandordirs; Name: "{app}\_internal"
