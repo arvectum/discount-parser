@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "task": "DP-CI-001",
+  "platform": "windows-x64",
+  "python_version": "3.11.9",
+  "pip_version": "26.2.1",
+  "pyinstaller_version": "6.22.1",
+  "pyinstaller_hooks_contrib_version": "2026.6",
+  "inno_setup_version": "6.7.1",
+  "dependency_lock": "requirements/windows-build.lock",
+  "python_hash_seed": "1",
+  "source_date_epoch": "git-commit-timestamp",
+  "installer": {
+    "path": "delivery/DiscountParser-Setup.exe",
+    "max_size_bytes": 67108864
+  }
+}
