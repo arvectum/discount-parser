@@ -1,0 +1,54 @@
+name: DP-REPO-002 Restore Verified Refs
+
+on:
+  push:
+    branches:
+      - recovery/dp-repo-002-import
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Restore only independently verified tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          restore_tag() {
+            local name="$1"
+            local sha="$2"
+            local endpoint="repos/${GH_REPO}/git/ref/tags/${name}"
+            local existing
+            existing="$(gh api "$endpoint" --jq '.object.sha' 2>/dev/null || true)"
+            if [ -n "$existing" ]; then
+              if [ "$existing" != "$sha" ]; then
+                echo "::error::Tag ${name} exists at ${existing}, expected ${sha}; refusing to move it"
+                exit 1
+              fi
+              echo "TAG_PRESENT|${name}|${sha}"
+              return
+            fi
+            gh api --method POST "repos/${GH_REPO}/git/refs" \
+              -f ref="refs/tags/${name}" \
+              -f sha="$sha" >/dev/null
+            existing="$(gh api "$endpoint" --jq '.object.sha')"
+            test "$existing" = "$sha"
+            echo "TAG_RESTORED|${name}|${sha}"
+          }
+
+          restore_tag \
+            discount-parser-telegram-hotfix-2026-08-15 \
+            770d8d3fc11b734909a512841851ef6b25ae7d63
+
+          restore_tag \
+            discount-parser-windows-recovery-hotfix-2026-08-16 \
+            b6ba4e0808d640e938bdd53eb1cf87b2416cca10
+
+          echo "VERIFIED_TAG_RESTORE=PASS"
