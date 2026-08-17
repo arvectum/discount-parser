@@ -42,14 +42,14 @@ The application is installed under a path containing Cyrillic components (`По�
 
 1. initial Setup exit code `0`;
 2. installed `DiscountParser.exe` and `DiscountParserWorker.exe`;
-3. Desktop `.lnk` target and working directory resolve to the installed Unicode path;
-4. Start Menu `.lnk` target and working directory resolve to the same executable/path;
-5. in-place reinstall succeeds and both links remain valid;
+3. launching the Desktop `.lnk` through the Windows shell starts the exact `DiscountParser.exe` from the Unicode install path;
+4. launching the Start Menu `.lnk` starts that same expected installed executable;
+5. in-place reinstall succeeds and both shortcuts still launch the expected executable;
 6. uninstall succeeds and removes the product-owned Desktop link;
-7. reinstall after uninstall succeeds and recreates valid links;
+7. reinstall after uninstall succeeds and recreates working shortcuts;
 8. final uninstall succeeds.
 
-This does not rename the GitHub-hosted Windows account, but it exercises the same Unicode filesystem/link-target APIs implicated by a Cyrillic user profile.
+The gate deliberately validates shortcuts by launching them and observing the resulting Windows process path instead of relying on the `WScript.Shell` shortcut-property adapter, which can degrade non-ASCII path text on the hosted runner. This does not rename the GitHub-hosted Windows account, but it exercises the same Unicode filesystem, shell-link and process-launch APIs implicated by a Cyrillic user profile.
 
 ### Scenario B — forced Desktop shortcut-save failure
 
@@ -60,7 +60,7 @@ Acceptance requires all of the following simultaneously:
 - Setup still exits `0`;
 - installed application payload remains present;
 - Setup log contains the DP-WIN-P0.2 best-effort failure marker;
-- the Start Menu shortcut still exists and points at the installed `DiscountParser.exe`;
+- the Start Menu shortcut still launches the installed `DiscountParser.exe` from the expected install directory;
 - uninstall succeeds after the synthetic blocker is removed.
 
 The test does not depend on the exact HRESULT produced by the synthetic collision; the contract being tested is that **any** `CreateShellLink` exception, including customer `0x80070005`, is non-fatal.
@@ -72,6 +72,7 @@ The test does not depend on the exact HRESULT produced by the synthetic collisio
 - no Desktop constant appears in `[Icons]`;
 - Start Menu remains in `[Icons]`;
 - Desktop task selection, executable existence check, `CreateShellLink`, `try..except`, log marker and uninstall cleanup remain present;
+- the resilience harness actually launches shortcuts and binds the observed `DiscountParser.exe` process to the expected install path;
 - the Windows workflow actually executes and uploads evidence from the resilience gate.
 
 Existing DP-CI-001 reproducibility and DP-CI-002 installed runtime acceptance continue to run for the same pull request.
