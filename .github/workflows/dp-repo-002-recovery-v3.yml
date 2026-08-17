@@ -1,0 +1,105 @@
+name: DP-REPO-002 Import GitVerse Product Head
+
+on:
+  push:
+    branches:
+      - recovery/dp-repo-002-import
+
+permissions:
+  contents: write
+
+jobs:
+  import-product-head:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Import live-verified GitVerse main and recover accepted Windows tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
+          EXPECTED_GITVERSE_MAIN: ff8efb4186ebccca2c30cc78b8fefb5ec7cd0cf5
+          ACCEPTED_WINDOWS_PREFIX: b6ba4e0
+          ACCEPTED_WINDOWS_TAG: discount-parser-windows-recovery-hotfix-2026-08-16
+          ACCEPTED_INSTALLER_SHA256: E001979A77FF40F3C2FEF84594BE1C57B0C57979CDF331A3EE1D620AD4024509
+        run: |
+          set -euo pipefail
+          test -n "$GITVERSE_TOKEN"
+          test -n "$GITVERSE_REPOSITORY"
+
+          git clone --bare \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPOSITORY}.git" \
+            repository.git
+          cd repository.git
+          git remote add gitverse \
+            "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/arvectum/${GITVERSE_REPOSITORY}.git"
+
+          git fetch --no-tags gitverse \
+            refs/heads/main:refs/recovery/gitverse-main
+
+          gv_main="$(git rev-parse refs/recovery/gitverse-main)"
+          gh_main="$(git rev-parse refs/heads/main)"
+          test "$gv_main" = "$EXPECTED_GITVERSE_MAIN" || {
+            echo "::error::GitVerse main changed: expected $EXPECTED_GITVERSE_MAIN, got $gv_main"
+            exit 1
+          }
+
+          # Import the exact GitVerse object graph under one immutable recovery
+          # branch. No canonical GitHub ref is updated here.
+          target="refs/heads/recovery/gitverse-main-ff8efb4-20260817"
+          existing="$(git ls-remote origin "$target" | awk '{print $1}')"
+          if [ -n "$existing" ]; then
+            test "$existing" = "$gv_main" || {
+              echo "::error::$target exists at $existing, expected $gv_main"
+              exit 1
+            }
+          else
+            git push origin "$gv_main:$target"
+          fi
+
+          matches="$(git rev-list "$gv_main" | grep "^${ACCEPTED_WINDOWS_PREFIX}" || true)"
+          count="$(printf '%s\n' "$matches" | sed '/^$/d' | wc -l | tr -d ' ')"
+          test "$count" = "1" || {
+            echo "::error::Accepted Windows prefix $ACCEPTED_WINDOWS_PREFIX resolved to $count commits"
+            exit 1
+          }
+          accepted_commit="$(printf '%s\n' "$matches" | head -n1)"
+          git merge-base --is-ancestor "$accepted_commit" "$gv_main"
+
+          accepted_branch="refs/heads/recovery/accepted-windows-${ACCEPTED_WINDOWS_PREFIX}-20260816"
+          existing_branch="$(git ls-remote origin "$accepted_branch" | awk '{print $1}')"
+          if [ -n "$existing_branch" ]; then
+            test "$existing_branch" = "$accepted_commit" || {
+              echo "::error::Accepted Windows recovery branch mismatch"
+              exit 1
+            }
+          else
+            git push origin "$accepted_commit:$accepted_branch"
+          fi
+
+          accepted_tag_ref="refs/tags/$ACCEPTED_WINDOWS_TAG"
+          existing_tag="$(git ls-remote origin "$accepted_tag_ref" | awk '{print $1}')"
+          if [ -n "$existing_tag" ]; then
+            test "$existing_tag" = "$accepted_commit" || {
+              echo "::error::$ACCEPTED_WINDOWS_TAG exists at $existing_tag, expected $accepted_commit"
+              exit 1
+            }
+          else
+            git push origin "$accepted_commit:$accepted_tag_ref"
+          fi
+
+          merge_base="$(git merge-base "$gh_main" "$gv_main")"
+          read -r gh_only gv_only < <(git rev-list --left-right --count "$gh_main...$gv_main")
+
+          echo "### DP-REPO-002 product-head recovery" >> "$GITHUB_STEP_SUMMARY"
+          echo "- GitHub main before reconciliation: \`$gh_main\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- GitVerse main live-verified/imported: \`$gv_main\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Recovery branch: \`${target#refs/heads/}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Merge base: \`$merge_base\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- GitHub-only commits: **$gh_only**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- GitVerse-only commits: **$gv_only**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Accepted Windows exact commit: \`$accepted_commit\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Restored immutable tag: \`$ACCEPTED_WINDOWS_TAG\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Accepted installer SHA-256 evidence: \`$ACCEPTED_INSTALLER_SHA256\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- GitHub main modified: **NO**" >> "$GITHUB_STEP_SUMMARY"
