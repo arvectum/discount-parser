@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "validity": [
+    {"text": "Акция действует до 31.12.2026", "expected": "2026-12-31"},
+    {"text": "Срок действия до 15 августа 2026", "expected": "2026-08-15"},
+    {"text": "Предложение бессрочно", "expected": null},
+    {"text": "Срок действия до 31.02.2026", "expected": null}
+  ],
+  "conditions": [
+    {
+      "text": "Скидка 20%, но не более 5 000 ₽. Только при заказе от 10 000 ₽.",
+      "max_discount_amount": "5000",
+      "min_order_amount": "10000",
+      "conditions_contains": ["не более 5 000 ₽", "заказе от 10 000 ₽"]
+    },
+    {
+      "text": "Обычная скидка без дополнительных ограничений.",
+      "max_discount_amount": null,
+      "min_order_amount": null,
+      "conditions_contains": []
+    }
+  ],
+  "geo": [
+    {"text": "Доставка по всей России", "scope": "all_russia", "city": null, "region": null},
+    {"text": "Акция только в Москве", "scope": "city", "city": "Москва", "region": null},
+    {"text": "Доступно в Московской области", "scope": "region", "city": null, "region": "Московская область"},
+    {"text": "География не указана", "scope": "unknown", "city": null, "region": null}
+  ],
+  "publication": [
+    {"status": "ready", "discount_percent": "25", "min_discount_percent": "20", "published_state": null, "eligible": true},
+    {"status": "needs_review", "discount_percent": "50", "min_discount_percent": "20", "published_state": null, "eligible": false},
+    {"status": "ready", "discount_percent": "10", "min_discount_percent": "20", "published_state": null, "eligible": false},
+    {"status": "ready", "discount_percent": "50", "min_discount_percent": "20", "published_state": "published", "eligible": false},
+    {"status": "ready", "discount_percent": "50", "min_discount_percent": "20", "published_state": "failed", "eligible": true}
+  ]
+}

@@ -13,6 +13,8 @@ from src.jobs.scheduler import run_scheduler
 from src.modules.source_registry.seed import seed_registry
 from src.qa.doctor import build_doctor_report
 from src.qa.operational_status import build_operational_status
+from src.qa.recovery import backup_database, database_integrity, recover_if_needed
+from src.qa.settings_portability import export_settings, import_settings
 from src.qa.support_bundle import build_support_bundle
 from src.shared.config import get_settings
 from src.shared.db import session_scope
@@ -59,6 +61,45 @@ def status_json() -> int:
     return 0
 
 
+def db_status() -> int:
+    _prepare_runtime_directory()
+    payload = database_integrity()
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0 if payload.get('healthy') else 1
+
+
+def db_backup() -> int:
+    _prepare_runtime_directory()
+    destination = backup_database()
+    print(str(destination) if destination else 'NO_DATABASE')
+    return 0
+
+
+def db_recover() -> int:
+    _prepare_runtime_directory()
+    payload = recover_if_needed()
+    print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+    return 0 if payload.get('after', {}).get('healthy') else 1
+
+
+def settings_export() -> int:
+    _prepare_runtime_directory()
+    output = sys.argv[2] if len(sys.argv) > 2 else None
+    destination = export_settings(output)
+    print(str(destination))
+    return 0
+
+
+def settings_import() -> int:
+    _prepare_runtime_directory()
+    if len(sys.argv) < 3:
+        print('settings-import requires a JSON file path', file=sys.stderr)
+        return 2
+    payload = import_settings(sys.argv[2])
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
 def support_bundle() -> int:
     _prepare_runtime_directory()
     output = sys.argv[2] if len(sys.argv) > 2 else None
@@ -83,6 +124,16 @@ def main() -> int:
         return doctor()
     if command_name == 'status-json':
         return status_json()
+    if command_name == 'db-status':
+        return db_status()
+    if command_name == 'db-backup':
+        return db_backup()
+    if command_name == 'db-recover':
+        return db_recover()
+    if command_name == 'settings-export':
+        return settings_export()
+    if command_name == 'settings-import':
+        return settings_import()
     if command_name == 'support-bundle':
         return support_bundle()
     print(f'Unknown worker command: {command_name}', file=sys.stderr)
