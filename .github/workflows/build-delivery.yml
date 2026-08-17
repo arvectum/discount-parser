@@ -178,6 +178,7 @@ jobs:
       - name: Validate canonical release tag and ancestry
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -199,9 +200,6 @@ jobs:
             echo "Release $TAG already exists; refusing to replace or mutate it" >&2
             exit 1
           fi
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
 
       - name: Download exact build outputs
         uses: actions/download-artifact@v4
@@ -251,7 +249,7 @@ jobs:
           python scripts/release_provenance.py \
             --verify release/release-provenance.json \
             --artifact-dir release
-          sha256sum -c release/SHA256SUMS
+          (cd release && sha256sum -c SHA256SUMS)
 
       - name: Attest release payload
         uses: actions/attest@v4
@@ -278,7 +276,7 @@ jobs:
             release/SHA256SUMS \
             release/release-provenance.json
 
-      - name: Publish release atomically after all assets are attached
+      - name: Publish release after all assets are attached
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -287,7 +285,7 @@ jobs:
           set -euo pipefail
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
 
-      - name: Verify published release binds tag, commit and assets
+      - name: Verify published release binds tag and assets
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
