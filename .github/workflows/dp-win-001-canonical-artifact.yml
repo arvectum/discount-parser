@@ -1,0 +1,102 @@
+name: DP-WIN-001 canonical artifact
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ops/dp-win-001-canonical-artifact
+    paths:
+      - .github/workflows/dp-win-001-canonical-artifact.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build-canonical-artifact:
+    name: Build exact-main canonical installer
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Checkout canonical source commit
+        uses: actions/checkout@v4
+        with:
+          ref: 934fa70b42fac7014c3d6a7c15ac75e1a7752874
+          fetch-depth: 0
+
+      - name: Verify canonical source
+        shell: pwsh
+        run: |
+          $sha = (& git rev-parse HEAD).Trim()
+          if ($sha -ne '934fa70b42fac7014c3d6a7c15ac75e1a7752874') {
+            throw "Wrong source SHA: $sha"
+          }
+          if (git status --porcelain) {
+            throw 'Canonical checkout is dirty'
+          }
+
+      - name: Read controlled build manifest
+        id: manifest
+        shell: pwsh
+        run: |
+          $manifest = Get-Content packaging/windows/build-manifest.json -Raw | ConvertFrom-Json
+          "python_version=$($manifest.python_version)" >> $env:GITHUB_OUTPUT
+          "pip_version=$($manifest.pip_version)" >> $env:GITHUB_OUTPUT
+          "inno_version=$($manifest.inno_setup_version)" >> $env:GITHUB_OUTPUT
+          "python_hash_seed=$($manifest.python_hash_seed)" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.manifest.outputs.python_version }}
+          cache: pip
+          cache-dependency-path: requirements/windows-build.lock
+
+      - name: Set deterministic build environment
+        shell: pwsh
+        run: |
+          $epoch = (& git show -s --format=%ct HEAD).Trim()
+          if (-not $epoch) { throw 'Cannot derive source commit timestamp' }
+          "PYTHONHASHSEED=${{ steps.manifest.outputs.python_hash_seed }}" >> $env:GITHUB_ENV
+          "SOURCE_DATE_EPOCH=$epoch" >> $env:GITHUB_ENV
+
+      - name: Install exact Python build closure
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade "pip==${{ steps.manifest.outputs.pip_version }}"
+          python -m pip install --no-deps --only-binary=:all: -r requirements/windows-build.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+          python -m pip check
+
+      - name: Ensure exact Inno Setup compiler
+        shell: pwsh
+        run: ./scripts/ensure_inno_setup.ps1 -Version "${{ steps.manifest.outputs.inno_version }}"
+
+      - name: Build controlled Windows installer
+        shell: pwsh
+        run: ./scripts/build_windows_ci.ps1
+
+      - name: Verify exact canonical installer identity
+        shell: pwsh
+        run: |
+          $expected = '07deeba5acff9b13420fd93e20288ea33b8e5c53ceb2476f5649582fd966d457'
+          $actual = (Get-FileHash 'delivery/DiscountParser-Setup.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size = (Get-Item 'delivery/DiscountParser-Setup.exe').Length
+          Write-Host "expected_sha256=$expected"
+          Write-Host "actual_sha256=$actual"
+          Write-Host "size_bytes=$size"
+          if ($actual -ne $expected) {
+            throw "Canonical installer SHA mismatch: expected $expected actual $actual"
+          }
+          if ($size -ne 51025181) {
+            throw "Canonical installer size mismatch: expected 51025181 actual $size"
+          }
+
+      - name: Upload exact canonical installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: dp-win-001-canonical-934fa70
+          path: |
+            delivery/DiscountParser-Setup.exe
+            delivery/windows-build-provenance.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
