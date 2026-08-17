@@ -21,7 +21,7 @@ _STANDARD_LOG_KEYS = {
 # traceback or third-party exception cannot leak credentials into app.log.
 _SECRET_PATTERNS = [
     re.compile(
-        r"(?i)\b(bot[_-]?token|telegram[_-]?bot[_-]?token|api[_-]?(?:key|hash)|password|passwd|proxy[_-]?password|access[_-]?token|secret|session|authorization|proxy-authorization|vk[_-]?access[_-]?token|cookie|set-cookie|x-api-key|telegram[_-]?(?:channel_id|admin_ids)|admin[_-]?id|channel[_-]?id)\s*[:=]\s*['\"]?([^'\"\s,;]+)"
+        r"(?i)\b(token|bot[_-]?token|telegram[_-]?bot[_-]?token|api[_-]?(?:key|hash)|password|passwd|proxy[_-]?password|access[_-]?token|secret|session|authorization|proxy-authorization|vk[_-]?access[_-]?token|cookie|set-cookie|x-api-key|telegram[_-]?(?:channel_id|admin_ids)|admin[_-]?id|channel[_-]?id)\s*[:=]\s*['\"]?([^'\"\s,;]+)"
     ),
     re.compile(r"(?i)(https?://)([^/@:\s]+):([^/@\s]+)@"),
     re.compile(r"\d{7,12}:[A-Za-z0-9_-]{34,46}"),
@@ -43,13 +43,7 @@ def redact_secrets(text: str) -> str:
 
 
 def redact_value(value):
-    """Recursively redact strings in structured logging extras.
-
-    JSON log extras frequently contain nested dict/list payloads. Converting an
-    entire object to one string loses structure and can leave secrets in custom
-    serializers; recursively redacting keeps the useful shape and the privacy
-    boundary at the formatter.
-    """
+    """Recursively redact strings in structured logging extras."""
     if isinstance(value, str):
         return redact_secrets(value)
     if isinstance(value, dict):
@@ -108,10 +102,8 @@ def configure_logging(level: str = "INFO", log_format: str = "plain", *, compone
         h.close()
 
     root.setLevel(level.upper())
-
     fmt_str = f"%(asctime)s [%(process)d] %(levelname)s [{component or '%(name)s'}]: %(message)s"
     date_fmt = "%Y-%m-%d %H:%M:%S"
-
     stream_handler = logging.StreamHandler()
     stream_handler.addFilter(SecretFilter())
     if log_format.lower() == "json":
