@@ -78,7 +78,7 @@ Required workflows all passed before merge:
 - Windows installed acceptance — PASS;
 - DP-WIN-P0.2 installer resilience — PASS.
 
-The machine-readable resilience artifact from Windows installed acceptance run `32044762853` reported:
+The machine-readable resilience artifact from pre-merge Windows installed acceptance run `32044762853` reported:
 
 - overall `status`: `PASS`;
 - tested installer SHA-256: `d5c5cb9340d67d340a2991a9433272247521d6649ded83a63ec362296e1b87f1`;
@@ -98,6 +98,31 @@ The machine-readable resilience artifact from Windows installed acceptance run `
 
 PR #20 was then merged to canonical `main` as `4fa6eb03e4bcdd39e3a4db8e9c45378552c07541`.
 
+### Canonical `main` revalidation
+
+The exact canonical merge commit was rebuilt and re-tested after merge, not merely trusted from the pull-request merge candidate:
+
+- main CI run `32045221339` — PASS;
+- main Windows reproducibility run `32045221352` — PASS;
+- main Windows installed acceptance run `32045221366` — PASS;
+- DP-WIN-P0.2 resilience step inside that installed-acceptance run — PASS.
+
+The canonical-main machine-readable resilience evidence has `source_sha` exactly `4fa6eb03e4bcdd39e3a4db8e9c45378552c07541` and reports:
+
+- overall `status`: `PASS`;
+- canonical-main tested installer SHA-256: `290eebaadfa5e2479b301fdc678e5059c8396040d505be453626d7957b8bb31f`;
+- `unicode_reinstall_cycle.status`: `PASS`;
+- all five install/reinstall/uninstall lifecycle exit codes: `0`;
+- Desktop and Start Menu shortcut launches: valid;
+- Desktop shortcut cleanup on uninstall: true;
+- `blocked_desktop_shortcut.status`: `PASS`;
+- forced Desktop shortcut failure observed: true;
+- Setup under forced shortcut failure: exit code `0`;
+- installed payload retained: true;
+- Start Menu launch remained valid: true;
+- Desktop failure classified non-fatal: true;
+- uninstall exit code: `0`.
+
 ## Regression protection
 
 `tests/test_windows_installed_acceptance.py` statically enforces that:
@@ -114,10 +139,10 @@ Existing DP-CI-001 reproducibility and DP-CI-002 installed runtime acceptance co
 
 All DP-WIN-P0.2 engineering criteria are satisfied:
 
-1. normal CI passed;
-2. reproducible Windows build gate passed;
-3. installed Windows acceptance passed;
-4. DP-WIN-P0.2 resilience evidence reported `PASS` for both scenarios;
+1. normal CI passed before and after merge;
+2. reproducible Windows build gate passed before and after merge;
+3. installed Windows acceptance passed before and after merge;
+4. DP-WIN-P0.2 resilience evidence reported `PASS` for both scenarios on canonical `main`;
 5. the hotfix was merged to canonical `main`;
 6. the hardening roadmap marks DP-WIN-P0.2 COMPLETE.
 
