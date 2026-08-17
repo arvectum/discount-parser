@@ -6,12 +6,21 @@ param(
 $ErrorActionPreference = "Stop"
 
 function Get-InstalledInnoSetupVersion {
-    $line = & choco list --exact innosetup --limit-output 2>$null |
+    $output = & choco list --exact innosetup --limit-output 2>$null
+    $exitCode = $LASTEXITCODE
+
+    # Chocolatey enhanced exit code 2 means "no results", which is the
+    # expected state on a clean GitHub-hosted runner before installation.
+    if ($exitCode -eq 2) {
+        return $null
+    }
+    if ($exitCode -ne 0) {
+        throw "Chocolatey failed while reading installed Inno Setup package identity (exit $exitCode)"
+    }
+
+    $line = $output |
         Where-Object { $_ -match '^InnoSetup\|' } |
         Select-Object -First 1
-    if ($LASTEXITCODE -ne 0) {
-        throw "Chocolatey failed while reading installed Inno Setup package identity"
-    }
     if (-not $line) {
         return $null
     }
