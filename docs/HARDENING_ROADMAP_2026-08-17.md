@@ -55,12 +55,36 @@ The DP-WIN-P0.2 machine-readable evidence reported `PASS` for both the Unicode l
 | Order | Task | Status | Where |
 | --- | --- | --- | --- |
 | 9 | **DP-DIAG-001 — Sanitized support bundle** | ✅ COMPLETE | ChatGPT + GitHub |
-| 10 | **DP-OBS-001 — Unified operational status / offer-pipeline visibility** | 🟡 IN PROGRESS — PR #19 exists and now needs reconciliation with the updated `main` | ChatGPT + GitHub; Windows installed acceptance in CI |
+| 10 | **DP-OBS-001 — Unified operational status / offer-pipeline visibility** | ✅ COMPLETE | ChatGPT + GitHub + GitHub Actions; merged by PR #19 |
 | 11 | **DP-SEC-001 — Local web-panel mutation protection & secret-redaction hardening** | ⏳ QUEUED | ChatGPT + GitHub |
 | 12 | **DP-REC-001 — Self-service recovery** | ⏳ QUEUED | ChatGPT + GitHub; Windows runner where install-state behavior is involved |
 | 13 | **DP-REC-002 — Export/import settings** | ⏳ QUEUED | ChatGPT + GitHub |
 | 14 | **DP-QA-001 — Parser regression corpus** | ⏳ QUEUED | ChatGPT + GitHub |
 | 15 | **DP-QA-002 — Data-quality regression matrix** | ⏳ QUEUED | ChatGPT + GitHub |
+
+### DP-OBS-001 — completed acceptance
+
+PR #19 was reconciled onto canonical `main` after the DP-WIN-P0.2 changes. The original feature head was preserved at `backup/dp-obs-001-pre-reconcile-20260817`, then the feature branch was rebuilt from the current `main` so no stale-base conflict or unrelated rollback was carried forward.
+
+Accepted behavior now includes:
+
+- one machine-readable `ok` / `warning` / `error` operational state contract;
+- doctor required/optional failure summaries;
+- per-source freshness, latest-run counters and sanitized errors;
+- allowlisted aggregate counters with no raw offers/publication IDs;
+- process state only when genuinely observed by the desktop `ProcessManager`;
+- `DiscountParserWorker.exe status-json`;
+- local `GET /system/status.json` with safe pre-setup HTTP 409;
+- reuse of the same model in `diagnostics/operational-status.json` inside the sanitized support bundle.
+
+Acceptance on reconciled head `af2881b2315301cc332ed0e9a582f6f99bcc7fba`:
+
+- normal multi-platform CI — PASS;
+- `build-delivery` — PASS;
+- Windows reproducibility — PASS;
+- Windows installed acceptance, including DP-WIN-P0.2 resilience — PASS.
+
+PR #19 was merged to canonical `main` as `f15a8252b97be63bf98ac5333f0e7cdd0b757805`; issue #18 closed automatically as completed.
 
 ## P2 — customer documentation
 
@@ -83,4 +107,4 @@ When the roadmap reaches DP-WIN-001 and no earlier ChatGPT/GitHub task remains, 
 
 ## Current next action
 
-**DP-OBS-001 — reconcile PR #19 with the new canonical `main`, rerun its repository/Windows CI gates, and merge it when green.**
+**DP-SEC-001 — harden local web-panel mutations and secret redaction, add deterministic regression coverage, run repository/Windows gates, and merge when green.**
