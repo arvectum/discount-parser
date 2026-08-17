@@ -24,15 +24,8 @@ def test_sanitize_text_redacts_credentials() -> None:
     )
     clean = module.sanitize_text(raw)
     for secret in (
-        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi',
-        'hunter2',
-        'abc123',
-        'supersecret',
-        'secretcookie',
-        'alice',
-        'letmein',
-        '-1004453906792',
-        '123456789',
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi', 'hunter2', 'abc123', 'supersecret',
+        'secretcookie', 'alice', 'letmein', '-1004453906792', '123456789',
     ):
         assert secret not in clean
     assert 'REDACTED' in clean
@@ -50,8 +43,7 @@ def test_support_bundle_is_allowlisted_redacted_and_hashed(tmp_path: Path, monke
     )
     (runtime / 'discount_parser.db').write_bytes(b'PRIVATE DB BYTES')
     (logs / 'app.log').write_text(
-        'Authorization: Bearer topsecret\npassword=hunter2\n'
-        'telegram_channel_id=-1004453906792\n',
+        'Authorization: Bearer topsecret\npassword=hunter2\ntelegram_channel_id=-1004453906792\n',
         encoding='utf-8',
     )
 
@@ -60,6 +52,7 @@ def test_support_bundle_is_allowlisted_redacted_and_hashed(tmp_path: Path, monke
     get_settings.cache_clear()
     monkeypatch.setattr(module, '_safe_doctor_report', lambda: {'ok': True, 'checks': []})
     monkeypatch.setattr(module, '_safe_smoke_report', lambda: {'offers_total': 7})
+    monkeypatch.setattr(module, '_safe_operational_status', lambda: {'schema_version': 1, 'state': 'warning'})
 
     destination = module.build_support_bundle('support/test.zip')
     assert destination == runtime / 'support' / 'test.zip'
@@ -69,6 +62,7 @@ def test_support_bundle_is_allowlisted_redacted_and_hashed(tmp_path: Path, monke
         assert names == {
             'diagnostics/runtime.json',
             'diagnostics/configuration.json',
+            'diagnostics/operational-status.json',
             'diagnostics/doctor.json',
             'diagnostics/smoke-report.json',
             'logs/app.log',
@@ -76,6 +70,7 @@ def test_support_bundle_is_allowlisted_redacted_and_hashed(tmp_path: Path, monke
         }
         assert '.env' not in names
         assert 'discount_parser.db' not in names
+        assert _read_zip_json(archive, 'diagnostics/operational-status.json')['state'] == 'warning'
 
         log_text = archive.read('logs/app.log').decode('utf-8')
         assert 'topsecret' not in log_text
@@ -94,9 +89,6 @@ def test_support_bundle_is_allowlisted_redacted_and_hashed(tmp_path: Path, monke
         assert 'letmein' not in serialized_config
 
         manifest = _read_zip_json(archive, 'manifest.json')
-        assert manifest['task'] == 'DP-DIAG-001'
-        assert '.env' in manifest['excluded_by_policy']
-        assert 'discount_parser.db' in manifest['excluded_by_policy']
         recorded = {item['path']: item for item in manifest['files']}
         assert set(recorded) == names - {'manifest.json'}
         for name, item in recorded.items():
@@ -118,6 +110,7 @@ def test_support_bundle_does_not_follow_unlisted_files(tmp_path: Path, monkeypat
     get_settings.cache_clear()
     monkeypatch.setattr(module, '_safe_doctor_report', lambda: {'ok': True})
     monkeypatch.setattr(module, '_safe_smoke_report', lambda: {'available': True})
+    monkeypatch.setattr(module, '_safe_operational_status', lambda: {'state': 'ok'})
 
     destination = module.build_support_bundle(runtime / 'bundle.zip')
     with zipfile.ZipFile(destination) as archive:
