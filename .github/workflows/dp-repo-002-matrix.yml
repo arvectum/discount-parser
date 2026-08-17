@@ -1,0 +1,94 @@
+name: DP-REPO-002 Ref Reconciliation Matrix
+
+on:
+  push:
+    branches:
+      - recovery/dp-repo-002-import
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Analyze canonical recovery graph
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          PRODUCT_HEAD: refs/heads/recovery/gitverse-main-ff8efb4-20260817
+          AUDIT_HEAD: refs/heads/main
+          MERGE_BASE_EXPECTED: bc91a0597e6686f494326f7420b8f4b133ee4913
+          LOST_WINDOWS_PREFIX: b6ba4e0
+        run: |
+          set -euo pipefail
+          git clone --mirror "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPOSITORY}.git" repo.git
+          cd repo.git
+
+          product="$(git rev-parse "$PRODUCT_HEAD")"
+          canonical="$(git rev-parse "$AUDIT_HEAD")"
+          merge_base="$(git merge-base "$canonical" "$product")"
+          test "$merge_base" = "$MERGE_BASE_EXPECTED"
+
+          echo "### DP-REPO-002 ref reconciliation" >> "$GITHUB_STEP_SUMMARY"
+          echo "- current GitHub main: \`$canonical\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- recovered GitVerse product head: \`$product\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- merge base: \`$merge_base\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Product-line commits after merge base" >> "$GITHUB_STEP_SUMMARY"
+          git log --reverse --format='- `%H` — %s' "$merge_base..$product" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Recovery/hotfix/release candidate matrix" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ref | tip | relation to product head | product-only | ref-only | patch-unique in ref |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|---:|---:|---:|" >> "$GITHUB_STEP_SUMMARY"
+
+          while read -r ref; do
+            case "$ref" in
+              refs/heads/fix/*|refs/heads/hotfix/*|refs/heads/feature/*|refs/heads/recovery/*|refs/heads/reconcile/*|refs/tags/r12*|refs/tags/discount-parser-*) ;;
+              *) continue ;;
+            esac
+            case "$ref" in
+              refs/heads/recovery/dp-repo-002-import|refs/heads/recovery/gitverse-main-ff8efb4-20260817) continue ;;
+            esac
+            tip="$(git rev-parse "$ref^{commit}" 2>/dev/null || git rev-parse "$ref")"
+            product_only="$(git rev-list --count "$tip..$product")"
+            ref_only="$(git rev-list --count "$product..$tip")"
+            if [ "$tip" = "$product" ]; then
+              relation="equal"
+            elif git merge-base --is-ancestor "$tip" "$product"; then
+              relation="ancestor"
+            elif git merge-base --is-ancestor "$product" "$tip"; then
+              relation="descendant"
+            else
+              relation="diverged"
+            fi
+            patch_unique="$(git cherry "$product" "$tip" 2>/dev/null | grep -c '^+' || true)"
+            label="${ref#refs/heads/}"
+            label="${label#refs/tags/}"
+            echo "| \`$label\` | \`$tip\` | $relation | $product_only | $ref_only | $patch_unique |" >> "$GITHUB_STEP_SUMMARY"
+          done < <(git for-each-ref --format='%(refname)' refs/heads refs/tags | sort)
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Lost accepted-tag target search" >> "$GITHUB_STEP_SUMMARY"
+          lost="$(git rev-list --all | grep "^${LOST_WINDOWS_PREFIX}" || true)"
+          count="$(printf '%s\n' "$lost" | sed '/^$/d' | wc -l | tr -d ' ')"
+          echo "- reachable commits matching \`${LOST_WINDOWS_PREFIX}\`: **$count**" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$count" -gt 0 ]; then
+            printf '%s\n' "$lost" | sed 's/^/- `/' | sed 's/$/`/' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Deleted provenance refs" >> "$GITHUB_STEP_SUMMARY"
+          for ref in \
+            refs/heads/fix/windows-installer-startup-recovery \
+            refs/heads/release/windows-recovery-final-tested \
+            refs/tags/discount-parser-telegram-hotfix-2026-08-15 \
+            refs/tags/discount-parser-windows-recovery-hotfix-2026-08-16; do
+            if git show-ref --verify --quiet "$ref"; then
+              echo "- \`$ref\`: PRESENT at \`$(git rev-parse "$ref")\`" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- \`$ref\`: ABSENT" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
