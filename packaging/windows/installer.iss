@@ -50,8 +50,8 @@ Name: "{group}\Discount Parser"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: 
 [Code]
 procedure RegisterExtraCloseApplicationsResources();
 begin
-  ; Explicitly register both product executables with Restart Manager. The worker
-  ; is especially important because it can be a background process with no UI.
+  // Explicitly register both product executables with Restart Manager. The worker
+  // is especially important because it can be a background process with no UI.
   RegisterExtraCloseApplicationsResource(ExpandConstant('{app}\{#MyWorkerExeName}'));
   RegisterExtraCloseApplicationsResource(ExpandConstant('{app}\{#MyAppExeName}'));
 end;
