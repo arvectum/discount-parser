@@ -53,7 +53,7 @@ The accepted repository-only batch passed on head `2e46aa075905da8a91fb1daa90b22
 | --- | --- | --- | --- |
 | 18 | **DP-WIN-001 — Real installed Windows/customer acceptance** | ✅ COMPLETE — issue #31 | Windows notebook + human operator |
 | 19 | **DP-WIN-002 — Real Telegram E2E** | ✅ COMPLETE — issue #32 | Windows notebook; real bot/channel |
-| 20 | **DP-WIN-003 — Real source/network sweep** | ⏳ NEXT — issue #33 | Windows notebook; real network/sources |
+| 20 | **DP-WIN-003 — Real source/network sweep** | 🟡 IN PROGRESS — issue #33 / PR #50 | Windows notebook; real network/sources |
 
 ### DP-WIN-001 accepted physical baseline
 
@@ -73,8 +73,14 @@ Windows initially marked the downloaded installer/runner with `Zone.Identifier`;
 
 Evidence file `acceptance/dp-win-002-real-telegram-e2e.json` reported `PASS`, `credentials_embedded=false`, and passed the privacy check. No code/repository changes were made during the physical gate and no secrets were printed. Issue #32 is closed as completed.
 
-DP-WIN-003 is now unblocked and becomes the next physical Windows gate.
+### DP-WIN-003 repository preparation
+
+PR #50 adds the physical acceptance harness and canonical installed command `DiscountParserWorker.exe source-network-sweep`. The harness creates a database backup, validates database integrity before/after the sweep, inventories every actually enabled production source, performs sanitized direct/proxy/system reachability diagnostics, runs the real legacy/registry collection path, records the product router's observed route, validates scheduler cadence and writes privacy-gated evidence to `acceptance/dp-win-003-real-source-network-sweep.json`.
+
+Implementation also fixed a cadence defect found during DP-WIN-003: registry `check_interval_minutes` existed but the scheduled batch did not honor it. Background registry collection now skips sources that are not yet due; explicit targeted/manual collection remains immediate.
+
+Repository CI/merge do not complete DP-WIN-003. Issue #33 remains open until the installed post-merge build returns `PASS` on the physical Windows notebook against the real customer-network/source contour with `credentials_embedded=false`.
 
 ## Current next action
 
-**DP-WIN-003 — Real source/network sweep:** validate the actually configured production sources on the physical Windows notebook, including direct/proxy routing, collection behavior, source reachability/failures, scheduler cadence, and customer-network behavior, while preserving secrets and producing sanitized acceptance evidence.
+**Complete DP-WIN-003 repository gates, merge PR #50, then run the physical Windows command `DiscountParserWorker.exe source-network-sweep` on the installed post-merge build.** Close issue #33 only after sanitized evidence reports full PASS.
