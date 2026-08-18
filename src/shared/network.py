@@ -160,6 +160,21 @@ class NetworkRouter:
         with self._lock:
             self._cache[self._host_key(url)] = _RouteCacheEntry(route=route, expires_at=time.monotonic() + ttl_seconds)
 
+    def cached_route(self, url: str) -> str | None:
+        """Return the currently remembered route for a host without exposing proxy details."""
+        if is_loopback_url(url):
+            return "direct"
+        host = self._host_key(url)
+        now = time.monotonic()
+        with self._lock:
+            cached = self._cache.get(host)
+            if cached is None:
+                return None
+            if cached.expires_at <= now:
+                self._cache.pop(host, None)
+                return None
+            return cached.route
+
     def probe(self, url: str, *, route: str, timeout: float = 6.0) -> RouteProbe:
         started = time.monotonic()
         try:
