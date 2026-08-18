@@ -53,12 +53,42 @@ def _seed_telegram_test_sources(session: Session) -> tuple[int, int]:
     return created, updated
 
 
+def _retire_orphaned_legacy_mirrors(session: Session, *, configured_keys: set[str]) -> int:
+    """Disable obsolete registry mirrors that can no longer map to YAML adapters.
+
+    A ``legacy_adapter`` row is managed by ``config/sources.yaml`` and cannot
+    collect independently. Upgrade history may leave one behind after a source
+    key is removed or renamed. Keeping such a row enabled makes the registry
+    claim that a production source exists even though no matching adapter can
+    run it.
+
+    Only rows that are still ``legacy_adapter`` are reconciled here. If a user
+    changed a registry source to an explicit collector (for example CSS or
+    Telegram), that choice remains user-owned and is never retired by this
+    migration-safe seed step.
+    """
+    rows = session.scalars(
+        select(RegisteredSource).where(RegisteredSource.collector_type == "legacy_adapter")
+    ).all()
+    retired = 0
+    for row in rows:
+        if row.key in configured_keys or not row.enabled:
+            continue
+        row.enabled = False
+        row.status = "disabled"
+        retired += 1
+    return retired
+
+
 def seed_registry(session: Session, *, sources_config_path: str) -> dict[str, int]:
     keywords_created = seed_default_keywords(session)
     sources_created = 0
     sources_updated = 0
 
-    for config in load_source_configs(sources_config_path):
+    legacy_configs = load_source_configs(sources_config_path)
+    configured_legacy_keys = {config.key for config in legacy_configs}
+
+    for config in legacy_configs:
         row = session.scalar(select(RegisteredSource).where(RegisteredSource.key == config.key))
         if row is None:
             create_source(
@@ -80,10 +110,15 @@ def seed_registry(session: Session, *, sources_config_path: str) -> dict[str, in
             row.url = config.base_url
             row.platform = "promo_aggregator"
             row.source_type = "promo_aggregator"
-            # The YAML file supplies the initial legacy adapter only.  Once a
+            # The YAML file supplies the initial legacy adapter only. Once a
             # user configures CSS mappings in the UI, their explicit collector
             # choice must survive routine registry seeding.
             sources_updated += 1
+
+    sources_retired = _retire_orphaned_legacy_mirrors(
+        session,
+        configured_keys=configured_legacy_keys,
+    )
 
     telegram_created, telegram_updated = _seed_telegram_test_sources(session)
     sources_created += telegram_created
@@ -93,5 +128,6 @@ def seed_registry(session: Session, *, sources_config_path: str) -> dict[str, in
     return {
         "sources_created": sources_created,
         "sources_updated": sources_updated,
+        "sources_retired": sources_retired,
         "keywords_created": keywords_created,
     }
