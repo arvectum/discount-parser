@@ -85,9 +85,10 @@ def web_publish_hotfix(offer_id: int):
 def _repair_registry_rows_runtime() -> None:
     """Make the source screen tolerant of legacy/customer DB rows on every upgrade.
 
-    Migration 0007 repairs the known legacy shape.  This runtime guard repeats
-    the normalization before rendering so an installation that was upgraded
-    through an unusual path cannot turn the whole Sources page into HTTP 500.
+    Customer evidence showed that some upgraded databases still contain NULLs
+    in source-registry rows even after the historical migration path.  Normalize
+    all three UI-backed tables immediately before rendering, then keep the safe
+    fallback as a final guard so malformed legacy data cannot become HTTP 500.
     """
     with session_scope() as session:
         session.execute(
@@ -135,6 +136,50 @@ def _repair_registry_rows_runtime() -> None:
                     enabled IS NULL OR status IS NULL OR
                     status NOT IN ('healthy','degraded','blocked','requires_credentials','disabled','unknown') OR
                     failure_count IS NULL
+                """
+            )
+        )
+        session.execute(
+            text(
+                """
+                UPDATE source_candidates
+                SET
+                    platform = CASE
+                        WHEN platform IN ('website','promo_aggregator','telegram','vk','dzen','rutube','other') THEN platform
+                        ELSE 'other'
+                    END,
+                    url = COALESCE(url, ''),
+                    discovered_by = COALESCE(NULLIF(discovered_by, ''), 'legacy'),
+                    status = CASE
+                        WHEN status IN ('new','approved','rejected','ignored','invalid') THEN status
+                        ELSE 'new'
+                    END,
+                    confidence = COALESCE(confidence, 0.0)
+                WHERE
+                    platform IS NULL OR platform NOT IN ('website','promo_aggregator','telegram','vk','dzen','rutube','other') OR
+                    url IS NULL OR discovered_by IS NULL OR discovered_by = '' OR
+                    status IS NULL OR status NOT IN ('new','approved','rejected','ignored','invalid') OR
+                    confidence IS NULL
+                """
+            )
+        )
+        session.execute(
+            text(
+                """
+                UPDATE source_keywords
+                SET
+                    keyword = COALESCE(NULLIF(keyword, ''), 'legacy-keyword-' || id),
+                    normalized_keyword = COALESCE(NULLIF(normalized_keyword, ''), 'legacy-keyword-' || id),
+                    kind = CASE
+                        WHEN kind IN ('strong_positive','positive','negative','merchant','promo_code','price','custom') THEN kind
+                        ELSE 'custom'
+                    END,
+                    enabled = COALESCE(enabled, 0),
+                    priority = COALESCE(priority, 50)
+                WHERE
+                    keyword IS NULL OR keyword = '' OR normalized_keyword IS NULL OR normalized_keyword = '' OR
+                    kind IS NULL OR kind NOT IN ('strong_positive','positive','negative','merchant','promo_code','price','custom') OR
+                    enabled IS NULL OR priority IS NULL
                 """
             )
         )
