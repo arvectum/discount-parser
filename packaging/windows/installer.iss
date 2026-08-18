@@ -10,6 +10,12 @@ AppMutex=DiscountParserMutex_{{E9D2A6B6-4F2B-4C7A-90EE-44C33AC43FD2}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 DefaultDirName={localappdata}\DiscountParser
+; DP-WIN-001 physical recovery: Discount Parser has one supported per-user
+; installation directory. Never inherit a historical /DIR test path or an old
+; uninstall-registry directory, otherwise Setup can succeed in that old path
+; while a stale worker survives in the real product directory.
+UsePreviousAppDir=no
+DisableDirPage=yes
 DefaultGroupName={#MyAppName}
 OutputDir=output
 OutputBaseFilename=DiscountParser-Setup
