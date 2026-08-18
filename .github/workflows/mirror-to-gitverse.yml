@@ -1,14 +1,10 @@
 name: Mirror to GitVerse
 
+# DP-REPO-003: GitVerse is a non-blocking replica. Automatic mirroring is
+# intentionally deferred while the GitVerse backend has a stale main.lock.
+# Keep this workflow manual-only until the external backend condition is gone.
 on:
-  push:
-    branches:
-      - '**'
-    tags:
-      - '**'
   workflow_dispatch:
-  schedule:
-    - cron: '17 3 * * *'
 
 permissions:
   contents: read
