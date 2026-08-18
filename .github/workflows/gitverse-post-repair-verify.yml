@@ -1,28 +1,26 @@
-name: GitVerse final mirror acceptance
+name: GitVerse mirror health
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/mirror-to-gitverse.yml'
-      - '.github/workflows/gitverse-post-repair-verify.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '47 3 * * *'
 
 permissions:
   contents: read
-  issues: write
+
+env:
+  GITVERSE_ORG: arvectum
+  GITVERSE_REPOSITORY: discount-parser-github-mirror
 
 jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      GITVERSE_ORG: arvectum
-      GITVERSE_REPOSITORY: discount-parser-github-mirror
       GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Wait for full automatic mirror parity
+      - name: Verify canonical GitHub refs are mirrored
         shell: bash
         run: |
           set -euo pipefail
@@ -32,53 +30,24 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" canonical.git
           git --git-dir=canonical.git for-each-ref \
             --format='%(objectname) %(refname)' refs/heads refs/tags | sort > canonical.txt
+          git ls-remote --refs "$remote" 'refs/heads/*' 'refs/tags/*' \
+            | awk '{print $1 " " $2}' | sort > mirror.txt
 
-          result=FAIL
-          remote_main=""
-          missing_count=-1
+          comm -23 canonical.txt mirror.txt > missing.txt
+          missing_count="$(wc -l < missing.txt | tr -d ' ')"
+          github_main="$(git --git-dir=canonical.git rev-parse refs/heads/main)"
+          gitverse_main="$(awk '$2 == "refs/heads/main" {print $1}' mirror.txt)"
 
-          # The normal mirror pushes main first and then the remaining branches
-          # and tags. Wait for the whole canonical ref set, not merely main, so
-          # the verifier cannot race the mirror's non-main push loop.
-          for attempt in $(seq 1 24); do
-            git ls-remote --refs "$remote" 'refs/heads/*' 'refs/tags/*' \
-              | awk '{print $1 " " $2}' | sort > mirror.txt
-            remote_main="$(awk '$2 == "refs/heads/main" {print $1}' mirror.txt)"
-            comm -23 canonical.txt mirror.txt > missing.txt
-            missing_count="$(wc -l < missing.txt | tr -d ' ')"
+          {
+            echo '### GitVerse mirror health'
+            echo "- Canonical GitHub main: \`${github_main}\`"
+            echo "- GitVerse mirror main: \`${gitverse_main:-MISSING}\`"
+            echo "- Target: \`${GITVERSE_ORG}/${GITVERSE_REPOSITORY}\`"
+            echo "- Missing/mismatched canonical refs: \`${missing_count}\`"
+            echo '- Policy: no force, no prune, no deletion'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-            if test "$remote_main" = "$GITHUB_SHA" && test "$missing_count" = 0; then
-              result=PASS
-              break
-            fi
-
-            if test "$attempt" != "24"; then
-              sleep 5
-            fi
-          done
-
-          cat > report.md <<EOF
-          DP-REPO-003 automatic mirror acceptance: **${result}**
-
-          - canonical GitHub main: \`${GITHUB_SHA}\`
-          - GitVerse mirror main: \`${remote_main:-MISSING}\`
-          - target: \`${GITVERSE_ORG}/${GITVERSE_REPOSITORY}\`
-          - all canonical GitHub branches/tags present at identical SHAs: $([ "$missing_count" = 0 ] && echo YES || echo NO)
-          - unresolved canonical refs: \`${missing_count}\`
-          - force/prune/delete used by verifier: NO / NO / NO
-
-          This verifier is read-only against GitVerse and validates the normal automatic mirror workflow, not the bootstrap workflow.
-          EOF
-
-          if test "$result" != PASS; then
-            {
-              echo
-              echo 'Unresolved canonical refs:'
-              echo '```text'
-              cat missing.txt
-              echo '```'
-            } >> report.md
+          if test "$gitverse_main" != "$github_main" || test "$missing_count" != 0; then
+            cat missing.txt
+            exit 1
           fi
-
-          gh issue comment 34 --repo "$GITHUB_REPOSITORY" --body-file report.md
-          test "$result" = PASS
