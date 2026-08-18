@@ -1,10 +1,14 @@
 name: Mirror to GitVerse
 
-# DP-REPO-003: GitVerse is a non-blocking replica. Automatic mirroring is
-# intentionally deferred while the GitVerse backend has a stale main.lock.
-# Keep this workflow manual-only until the external backend condition is gone.
 on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '**'
   workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
 
 permissions:
   contents: read
@@ -12,6 +16,9 @@ permissions:
 concurrency:
   group: mirror-to-gitverse
   cancel-in-progress: false
+
+env:
+  GITVERSE_REPOSITORY: discount-parser-github-mirror
 
 jobs:
   mirror:
@@ -23,11 +30,10 @@ jobs:
       - name: Validate configuration
         env:
           GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
-          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
         run: |
           set -euo pipefail
           test -n "$GITVERSE_TOKEN" || { echo "::error::GITVERSE_TOKEN is missing"; exit 1; }
-          test -n "$GITVERSE_REPOSITORY" || { echo "::error::GITVERSE_REPO is missing"; exit 1; }
+          test "$GITVERSE_REPOSITORY" = "discount-parser-github-mirror" || { echo "::error::Unexpected GitVerse target"; exit 1; }
 
       - name: Clone canonical GitHub repository
         env:
@@ -42,7 +48,6 @@ jobs:
       - name: Preflight GitVerse main lineage
         env:
           GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
-          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
         run: |
           set -euo pipefail
           cd repository.git
@@ -66,20 +71,17 @@ jobs:
       - name: Push canonical main and preserve divergent replica refs
         env:
           GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
-          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
         run: |
           set -euo pipefail
           cd repository.git
 
-          # GitVerse is a replica, not a source of canonical truth. Never prune,
-          # delete, or force-update remote refs. Fetch replica branches into an
-          # isolated local namespace so non-main refs can be classified before
-          # deciding whether a normal fast-forward push is safe.
+          # GitHub is canonical. GitVerse is a replica. Never prune, delete,
+          # or force-update replica refs.
           git fetch --no-tags gitverse \
             '+refs/heads/*:refs/remotes/gitverse/*'
 
-          # main is canonical and was already lineage-checked above. A normal
-          # fast-forward update is mandatory; backend lock failures remain fatal.
+          # main must advance only by a normal fast-forward after the lineage
+          # preflight above.
           git push gitverse \
             refs/heads/main:refs/heads/main
 
@@ -137,8 +139,6 @@ jobs:
 
       - name: Summary
         if: success()
-        env:
-          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
         run: |
           echo "### GitVerse replica updated" >> "$GITHUB_STEP_SUMMARY"
           echo "- Canonical source: \`${GITHUB_REPOSITORY}\`" >> "$GITHUB_STEP_SUMMARY"
