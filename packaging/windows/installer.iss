@@ -110,10 +110,10 @@ begin
   AppExe := ExpandConstant('{app}\{#MyAppExeName}');
   WorkerExe := ExpandConstant('{app}\{#MyWorkerExeName}');
 
-  ; Restart Manager normally closes the product, but customer upgrade evidence
-  ; showed that a stale/background image can survive long enough for the file
-  ; replacement to fail with Windows error 5. Kill only our two owned images,
-  ; wait for handles to drain, then probe both files before Setup starts copying.
+  // Restart Manager normally closes the product, but customer upgrade evidence
+  // showed that a stale/background image can survive long enough for the file
+  // replacement to fail with Windows error 5. Kill only our two owned images,
+  // wait for handles to drain, then probe both files before Setup starts copying.
   StopProductProcess('{#MyWorkerExeName}');
   StopProductProcess('{#MyAppExeName}');
   Sleep(1200);
