@@ -57,7 +57,7 @@ def _uvicorn_logging_kwargs() -> dict[str, object]:
 
 def run_web_panel() -> None:
     settings = get_settings()
-    
+
     # Create a named mutex to allow the installer to detect running process
     if sys.platform == 'win32':
         mutex_name = 'DiscountParserMutex_{E9D2A6B6-4F2B-4C7A-90EE-44C33AC43FD2}'
@@ -77,6 +77,9 @@ def run_web_panel() -> None:
     threading.Thread(target=_open_browser, args=(url,), daemon=True).start()
 
     from src.web.application import app
+    from src.web.customer_hotfixes import install_customer_hotfixes
+
+    install_customer_hotfixes(app)
 
     uvicorn.run(
         app,
