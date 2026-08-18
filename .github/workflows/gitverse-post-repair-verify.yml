@@ -1,10 +1,11 @@
-name: GitVerse post-repair verify
+name: GitVerse final mirror acceptance
 
 on:
   push:
     branches:
       - main
     paths:
+      - '.github/workflows/mirror-to-gitverse.yml'
       - '.github/workflows/gitverse-post-repair-verify.yml'
 
 permissions:
@@ -17,51 +18,57 @@ jobs:
     timeout-minutes: 10
     env:
       GITVERSE_ORG: arvectum
-      GITVERSE_REPOSITORY: discount-parser
-      ARCHIVE_REPOSITORY: discount-parser-stale-main-lock-20260818
-      TEMP_REPOSITORY: discount-parser-mirror-replacement-20260818
-      EXPECTED_MAIN: c000616341877735277a616e27981858e0dd9ad5
+      GITVERSE_REPOSITORY: discount-parser-github-mirror
       GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
       GH_TOKEN: ${{ github.token }}
-      API_BASE: https://api.gitverse.ru
     steps:
-      - name: Verify repaired GitVerse state and report to issue 34
+      - name: Wait for automatic mirror and verify canonical refs
         shell: bash
         run: |
           set -euo pipefail
-          accept='Accept: application/vnd.gitverse.object+json;version=latest'
-          auth="Authorization: Bearer ${GITVERSE_TOKEN}"
+          remote="https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/${GITVERSE_ORG}/${GITVERSE_REPOSITORY}.git"
+          remote_main=""
 
-          active_status="$(curl -sS -o active.json -w '%{http_code}' -H "$auth" -H "$accept" \
-            "$API_BASE/repos/$GITVERSE_ORG/$GITVERSE_REPOSITORY")"
-          archive_status="$(curl -sS -o archive.json -w '%{http_code}' -H "$auth" -H "$accept" \
-            "$API_BASE/repos/$GITVERSE_ORG/$ARCHIVE_REPOSITORY")"
-          temp_status="$(curl -sS -o temp.json -w '%{http_code}' -H "$auth" -H "$accept" \
-            "$API_BASE/repos/$GITVERSE_ORG/$TEMP_REPOSITORY")"
-
-          remote_main="$(git ls-remote \
-            "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/${GITVERSE_ORG}/${GITVERSE_REPOSITORY}.git" \
-            refs/heads/main | awk '{print $1}')"
+          # The mirror workflow runs independently on the same push. Give it a
+          # bounded window to finish, then require exact main equality.
+          for attempt in $(seq 1 18); do
+            remote_main="$(git ls-remote "$remote" refs/heads/main | awk '{print $1}')"
+            if test "$remote_main" = "$GITHUB_SHA"; then
+              break
+            fi
+            test "$attempt" != "18" || break
+            sleep 5
+          done
 
           result=PASS
-          test "$active_status" = "200" || result=FAIL
-          test "$archive_status" = "200" || result=FAIL
-          test "$temp_status" = "404" || result=FAIL
-          test "$remote_main" = "$EXPECTED_MAIN" || result=FAIL
+          test "$remote_main" = "$GITHUB_SHA" || result=FAIL
+
+          git clone --mirror \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" canonical.git
+
+          missing_or_mismatched=0
+          while read -r sha ref; do
+            remote_sha="$(git ls-remote "$remote" "$ref" | awk '{print $1}')"
+            if test "$remote_sha" != "$sha"; then
+              echo "Mismatch: $ref GitHub=$sha GitVerse=${remote_sha:-MISSING}"
+              missing_or_mismatched=$((missing_or_mismatched + 1))
+            fi
+          done < <(git --git-dir=canonical.git for-each-ref \
+            --format='%(objectname) %(refname)' refs/heads refs/tags)
+
+          test "$missing_or_mismatched" = 0 || result=FAIL
 
           cat > report.md <<EOF
-          DP-REPO-003 post-repair verification: **${result}**
+          DP-REPO-003 automatic mirror acceptance: **${result}**
 
-          - expected repaired GitHub main: \`${EXPECTED_MAIN}\`
-          - active GitVerse main: \`${remote_main:-MISSING}\`
-          - active repository API: HTTP \`${active_status}\`
-          - preserved stale archive API: HTTP \`${archive_status}\`
-          - temporary replacement API: HTTP \`${temp_status}\` (expected 404 after rename)
-          - force/prune/delete used by verifier: NO
+          - canonical GitHub main: \`${GITHUB_SHA}\`
+          - GitVerse mirror main: \`${remote_main:-MISSING}\`
+          - target: \`${GITVERSE_ORG}/${GITVERSE_REPOSITORY}\`
+          - all canonical GitHub branches/tags present at identical SHAs: $([ "$missing_or_mismatched" = 0 ] && echo YES || echo NO)
+          - force/prune/delete used by verifier: NO / NO / NO
 
-          This verifier is read-only against GitVerse.
+          This verifier is read-only against GitVerse and validates the normal automatic mirror workflow, not the bootstrap workflow.
           EOF
 
           gh issue comment 34 --repo "$GITHUB_REPOSITORY" --body-file report.md
-
-          test "$result" = "PASS"
+          test "$result" = PASS
