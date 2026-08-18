@@ -1,0 +1,67 @@
+name: GitVerse post-repair verify
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/gitverse-post-repair-verify.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITVERSE_ORG: arvectum
+      GITVERSE_REPOSITORY: discount-parser
+      ARCHIVE_REPOSITORY: discount-parser-stale-main-lock-20260818
+      TEMP_REPOSITORY: discount-parser-mirror-replacement-20260818
+      EXPECTED_MAIN: c000616341877735277a616e27981858e0dd9ad5
+      GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      API_BASE: https://api.gitverse.ru
+    steps:
+      - name: Verify repaired GitVerse state and report to issue 34
+        shell: bash
+        run: |
+          set -euo pipefail
+          accept='Accept: application/vnd.gitverse.object+json;version=latest'
+          auth="Authorization: Bearer ${GITVERSE_TOKEN}"
+
+          active_status="$(curl -sS -o active.json -w '%{http_code}' -H "$auth" -H "$accept" \
+            "$API_BASE/repos/$GITVERSE_ORG/$GITVERSE_REPOSITORY")"
+          archive_status="$(curl -sS -o archive.json -w '%{http_code}' -H "$auth" -H "$accept" \
+            "$API_BASE/repos/$GITVERSE_ORG/$ARCHIVE_REPOSITORY")"
+          temp_status="$(curl -sS -o temp.json -w '%{http_code}' -H "$auth" -H "$accept" \
+            "$API_BASE/repos/$GITVERSE_ORG/$TEMP_REPOSITORY")"
+
+          remote_main="$(git ls-remote \
+            "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/${GITVERSE_ORG}/${GITVERSE_REPOSITORY}.git" \
+            refs/heads/main | awk '{print $1}')"
+
+          result=PASS
+          test "$active_status" = "200" || result=FAIL
+          test "$archive_status" = "200" || result=FAIL
+          test "$temp_status" = "404" || result=FAIL
+          test "$remote_main" = "$EXPECTED_MAIN" || result=FAIL
+
+          cat > report.md <<EOF
+          DP-REPO-003 post-repair verification: **${result}**
+
+          - expected repaired GitHub main: \`${EXPECTED_MAIN}\`
+          - active GitVerse main: \`${remote_main:-MISSING}\`
+          - active repository API: HTTP \`${active_status}\`
+          - preserved stale archive API: HTTP \`${archive_status}\`
+          - temporary replacement API: HTTP \`${temp_status}\` (expected 404 after rename)
+          - force/prune/delete used by verifier: NO
+
+          This verifier is read-only against GitVerse.
+          EOF
+
+          gh issue comment 34 --repo "$GITHUB_REPOSITORY" --body-file report.md
+
+          test "$result" = "PASS"
