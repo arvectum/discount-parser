@@ -8,6 +8,7 @@
 ## Status legend
 
 - ✅ COMPLETE — implementation and required CI/physical acceptance passed.
+- 🟡 IN PROGRESS — implementation/acceptance preparation is underway; required final gate has not passed yet.
 - ⏳ NEXT — next roadmap action, not started yet.
 - ⏳ DEFERRED — intentionally waiting for its prerequisite/local gate.
 - ⛔ EXTERNAL BLOCKER — requires an external platform/operator action.
@@ -51,7 +52,7 @@ The accepted repository-only batch passed on head `2e46aa075905da8a91fb1daa90b22
 | Order | Task | Status | Where |
 | --- | --- | --- | --- |
 | 18 | **DP-WIN-001 — Real installed Windows/customer acceptance** | ✅ COMPLETE — issue #31 | Windows notebook + human operator |
-| 19 | **DP-WIN-002 — Real Telegram E2E** | ⏳ NEXT — issue #32 | Windows notebook; real bot/channel |
+| 19 | **DP-WIN-002 — Real Telegram E2E** | 🟡 IN PROGRESS — issue #32; deterministic local harness prepared, physical live PASS pending | Windows notebook; real bot/channel |
 | 20 | DP-WIN-003 — Real source/network sweep | ⏳ DEFERRED — issue #33 | Windows notebook; real network/sources |
 
 ### DP-WIN-001 accepted physical baseline
@@ -64,6 +65,12 @@ The earlier R3/R4 stale-Worker failures were diagnosed as a test-harness lifecyc
 
 DP-WIN-002 starts only after DP-WIN-001 passes; that prerequisite is now satisfied. DP-WIN-003 starts only after DP-WIN-002 passes.
 
+### DP-WIN-002 prepared live acceptance
+
+`DiscountParserWorker.exe telegram-e2e` is the canonical physical acceptance command. It uses the installed runtime credentials and product network routing, validates `getMe` / `getChat` / `getChatMember` and posting rights, then executes isolated real manual publication, `failed → retry → published`, and real autopost scenarios. The temporary publication filter is restored and synthetic database rows are removed in cleanup. Telegram probe-message deletion is best-effort. Evidence intentionally excludes the bot token and raw channel identifier.
+
+Repository/CI preparation is not sufficient for completion: issue #32 closes only after this command returns `PASS` on the physical Windows notebook using the real installed build.
+
 ## Current next action
 
-**DP-WIN-002 — Real Telegram E2E. Intentionally not started in the DP-WIN-001 completion session.**
+**DP-WIN-002 — merge the prepared acceptance harness after CI, install that build on the physical Windows notebook, and run `DiscountParserWorker.exe telegram-e2e` with the already configured real bot/channel.**
