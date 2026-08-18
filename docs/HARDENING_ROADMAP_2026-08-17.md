@@ -52,8 +52,8 @@ The accepted repository-only batch passed on head `2e46aa075905da8a91fb1daa90b22
 | Order | Task | Status | Where |
 | --- | --- | --- | --- |
 | 18 | **DP-WIN-001 — Real installed Windows/customer acceptance** | ✅ COMPLETE — issue #31 | Windows notebook + human operator |
-| 19 | **DP-WIN-002 — Real Telegram E2E** | 🟡 IN PROGRESS — issue #32; deterministic local harness prepared, physical live PASS pending | Windows notebook; real bot/channel |
-| 20 | DP-WIN-003 — Real source/network sweep | ⏳ DEFERRED — issue #33 | Windows notebook; real network/sources |
+| 19 | **DP-WIN-002 — Real Telegram E2E** | ✅ COMPLETE — issue #32 | Windows notebook; real bot/channel |
+| 20 | **DP-WIN-003 — Real source/network sweep** | ⏳ NEXT — issue #33 | Windows notebook; real network/sources |
 
 ### DP-WIN-001 accepted physical baseline
 
@@ -63,14 +63,18 @@ Accepted evidence includes: canonical installed Worker identity `d12bc6eb89765c9
 
 The earlier R3/R4 stale-Worker failures were diagnosed as a test-harness lifecycle error: OpenCode timed out/terminated interactive Inno Setup before completion. The same canonical installer completed normally in a human-owned PowerShell process and replaced the stale Worker successfully. Installer/uninstaller lifecycle checks on physical Windows must therefore be human-owned or otherwise use a runner that waits for true process completion without an external timeout.
 
-DP-WIN-002 starts only after DP-WIN-001 passes; that prerequisite is now satisfied. DP-WIN-003 starts only after DP-WIN-002 passes.
+### DP-WIN-002 accepted physical baseline
 
-### DP-WIN-002 prepared live acceptance
+Physical Real Telegram E2E acceptance passed on the Windows notebook against canonical main `8d0c1e5eef0d23db9ea1881c48c1a3a74f0319dc`, accepted build tree `65dd5de1822f2da11f64bb7d808e63b85a5e617c`, installer SHA-256 `E84BBC85C7F7A294D865F118B83267C9C7B652ECCEAC8359059DEC5CA0DBD665`, and installed Worker SHA-256 `F8E119EBBC1333100AC322F781AD05E95A3CC363A4A3B40927C2F5F90B7C286E`.
 
-`DiscountParserWorker.exe telegram-e2e` is the canonical physical acceptance command. It uses the installed runtime credentials and product network routing, validates `getMe` / `getChat` / `getChatMember` and posting rights, then executes isolated real manual publication, `failed → retry → published`, and real autopost scenarios. The temporary publication filter is restored and synthetic database rows are removed in cleanup. Telegram probe-message deletion is best-effort. Evidence intentionally excludes the bot token and raw channel identifier.
+Windows initially marked the downloaded installer/runner with `Zone.Identifier`; the files were explicitly unblocked before execution. The accepted installer completed with exit code `0`. `doctor`, `status-json`, and `db-status` all passed.
 
-Repository/CI preparation is not sufficient for completion: issue #32 closes only after this command returns `PASS` on the physical Windows notebook using the real installed build.
+`DiscountParserWorker.exe telegram-e2e` passed the full live contract using the installed runtime credentials and product network routing: `getMe`, `getChat`, and `getChatMember`; administrator/posting rights; real manual publication; `failed → retry → published` with the same publication row reused; isolated real autopost; restoration of the original publication filter; removal of synthetic database rows; and successful deletion of three Telegram probe messages.
+
+Evidence file `acceptance/dp-win-002-real-telegram-e2e.json` reported `PASS`, `credentials_embedded=false`, and passed the privacy check. No code/repository changes were made during the physical gate and no secrets were printed. Issue #32 is closed as completed.
+
+DP-WIN-003 is now unblocked and becomes the next physical Windows gate.
 
 ## Current next action
 
-**DP-WIN-002 — merge the prepared acceptance harness after CI, install that build on the physical Windows notebook, and run `DiscountParserWorker.exe telegram-e2e` with the already configured real bot/channel.**
+**DP-WIN-003 — Real source/network sweep:** validate the actually configured production sources on the physical Windows notebook, including direct/proxy routing, collection behavior, source reachability/failures, scheduler cadence, and customer-network behavior, while preserving secrets and producing sanitized acceptance evidence.
