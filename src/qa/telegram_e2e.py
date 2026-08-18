@@ -55,6 +55,14 @@ def _channel_fingerprint(channel_id: str) -> str:
     return hashlib.sha256(channel_id.encode("utf-8")).hexdigest()[:16]
 
 
+def _safe_error(exc: Exception, *, token: str = "", channel_id: str = "") -> str:
+    text = redact_secrets(f"{type(exc).__name__}: {exc}")
+    for value in (token, channel_id):
+        if value:
+            text = text.replace(value, "***REDACTED***")
+    return text
+
+
 def _snapshot_default_filter() -> dict:
     row = get_or_create_default_filter(min_discount_percent=get_settings().telegram_default_min_discount)
     return {field: getattr(row, field) for field in _FILTER_FIELDS}
@@ -121,29 +129,31 @@ def _require_published(result: PublishResult, scenario: str) -> None:
 
 
 async def run_real_telegram_e2e_async() -> dict:
+    started_at = datetime.now(UTC)
     settings = get_settings()
     token = (settings.telegram_bot_token or "").strip()
     channel_id = (settings.telegram_channel_id or "").strip()
-    if not token or not channel_id:
-        raise TelegramE2EError("Telegram bot token/channel are not configured in the installed runtime")
-
-    started_at = datetime.now(UTC)
     evidence: dict = {
         "schema_version": 1,
         "task": "DP-WIN-002",
         "scenario": "real_telegram_e2e",
         "status": "RUNNING",
         "started_at": started_at.isoformat(),
-        "network_route": resolve_telegram_route(),
-        "channel_fingerprint": _channel_fingerprint(channel_id),
         "credentials_embedded": False,
     }
     created_offer_ids: list[int] = []
     message_ids: list[str] = []
     filter_snapshot: dict | None = None
-    bot = build_bot(token)
+    bot = None
 
     try:
+        if not token or not channel_id:
+            raise TelegramE2EError("Telegram bot token/channel are not configured in the installed runtime")
+
+        evidence["network_route"] = resolve_telegram_route()
+        evidence["channel_fingerprint"] = _channel_fingerprint(channel_id)
+        bot = build_bot(token)
+
         me = await bot.get_me()
         chat = await bot.get_chat(channel_id)
         member = await bot.get_chat_member(channel_id, me.id)
@@ -156,7 +166,6 @@ async def run_real_telegram_e2e_async() -> dict:
 
         evidence["telegram_identity"] = {
             "bot_username": me.username,
-            "bot_id": int(me.id),
             "chat_type": _enum_value(chat.type),
             "member_status": member_status,
             "can_post_messages": can_post,
@@ -227,13 +236,10 @@ async def run_real_telegram_e2e_async() -> dict:
             "selected_only_probe_offer": True,
             "telegram_message_id": autopost.telegram_message_id,
         }
-
         evidence["status"] = "PASS"
-        return evidence
     except Exception as exc:
         evidence["status"] = "FAIL"
-        evidence["error"] = redact_secrets(f"{type(exc).__name__}: {exc}")
-        return evidence
+        evidence["error"] = _safe_error(exc, token=token, channel_id=channel_id)
     finally:
         if filter_snapshot is not None:
             try:
@@ -241,17 +247,20 @@ async def run_real_telegram_e2e_async() -> dict:
                 evidence["filter_restored"] = True
             except Exception as exc:
                 evidence["filter_restored"] = False
-                evidence["filter_restore_error"] = redact_secrets(f"{type(exc).__name__}: {exc}")
+                evidence["filter_restore_error"] = _safe_error(exc, token=token, channel_id=channel_id)
                 evidence["status"] = "FAIL"
+        else:
+            evidence["filter_restored"] = True
 
         cleanup: list[dict] = []
-        for message_id in message_ids:
-            cleanup.append(
-                {
-                    "telegram_message_id": message_id,
-                    "deleted": await _delete_message_best_effort(bot, channel_id, message_id),
-                }
-            )
+        if bot is not None:
+            for message_id in message_ids:
+                cleanup.append(
+                    {
+                        "telegram_message_id": message_id,
+                        "deleted": await _delete_message_best_effort(bot, channel_id, message_id),
+                    }
+                )
         evidence["telegram_cleanup"] = cleanup
 
         for offer_id in reversed(created_offer_ids):
@@ -259,14 +268,17 @@ async def run_real_telegram_e2e_async() -> dict:
                 _delete_probe_offer(offer_id)
             except Exception as exc:
                 evidence.setdefault("db_cleanup_errors", []).append(
-                    redact_secrets(f"offer {offer_id}: {type(exc).__name__}: {exc}")
+                    _safe_error(exc, token=token, channel_id=channel_id)
                 )
                 evidence["status"] = "FAIL"
 
         evidence["database_probe_cleanup"] = "PASS" if not evidence.get("db_cleanup_errors") else "FAIL"
         evidence["finished_at"] = datetime.now(UTC).isoformat()
         evidence["duration_seconds"] = round((datetime.now(UTC) - started_at).total_seconds(), 3)
-        await bot.session.close()
+        if bot is not None:
+            await bot.session.close()
+
+    return evidence
 
 
 def run_real_telegram_e2e(output: str | Path | None = None) -> dict:
@@ -275,6 +287,6 @@ def run_real_telegram_e2e(output: str | Path | None = None) -> dict:
     if not destination.is_absolute():
         destination = (runtime_root() / destination).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(evidence, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
     evidence["evidence_path"] = str(destination)
+    destination.write_text(json.dumps(evidence, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
     return evidence
