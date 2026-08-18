@@ -10,8 +10,8 @@
 - ✅ COMPLETE — implementation and required CI/physical acceptance passed.
 - 🟡 IN PROGRESS — implementation/acceptance preparation is underway; required final gate has not passed yet.
 - ⏳ NEXT — next roadmap action, not started yet.
-- ⏳ DEFERRED — intentionally waiting for its prerequisite/local gate.
-- ⛔ EXTERNAL BLOCKER — requires an external platform/operator action.
+- ⏳ DEFERRED — intentionally postponed and not blocking the current delivery cycle.
+- ⛔ EXTERNAL BLOCKER — requires an external platform/operator action and blocks acceptance only when explicitly marked as release-blocking.
 
 ## P0 — repository, release and Windows delivery safety
 
@@ -24,7 +24,15 @@
 | 5 | DP-CI-002 — Windows installed acceptance | ✅ COMPLETE | GitHub Actions / Windows |
 | 6 | DP-CI-003 — Release gate | ✅ COMPLETE | GitHub Actions |
 | 7 | DP-WIN-P0.2 — Installer shortcut/rollback hardening | ✅ COMPLETE | GitHub Actions / Windows |
-| 8 | DP-REPO-003 — GitVerse stale `main.lock` mirror unblock | ⛔ EXTERNAL BLOCKER — issue #34 | GitVerse operator/platform |
+| 8 | DP-REPO-003 — GitVerse stale `main.lock` mirror unblock | ⏳ DEFERRED / NON-BLOCKING — issue #34 closed `not planned`; mirror manual-only | GitVerse operator/platform if revisited |
+
+### GitVerse disposition
+
+GitHub remains the canonical repository and source of release truth. GitVerse is a recovery replica only and is not part of the Discount Parser customer/release acceptance gate.
+
+A fresh mirror rerun on 2026-08-18 passed canonical lineage preflight and then failed only because the GitVerse backend could not create `refs/heads/main.lock` because that lock file already existed. The failure is server-side repository state, not a canonical-history or application defect.
+
+For the current delivery cycle the mirror is intentionally manual-only. No force-push, prune, branch deletion/recreation or destructive ref reconciliation is permitted. Issue #34 records the canonical deferred decision; historical duplicate issue #7 is closed as duplicate.
 
 ## P1 — supportability, security, recovery and QA
 
@@ -54,6 +62,7 @@ The accepted repository-only batch passed on head `2e46aa075905da8a91fb1daa90b22
 | 18 | **DP-WIN-001 — Real installed Windows/customer acceptance** | ✅ COMPLETE — issue #31 | Windows notebook + human operator |
 | 19 | **DP-WIN-002 — Real Telegram E2E** | ✅ COMPLETE — issue #32 | Windows notebook; real bot/channel |
 | 20 | **DP-WIN-003 — Real source/network sweep** | ✅ COMPLETE — issue #33 / PRs #50, #51 | Windows notebook; real network/sources |
+| 21 | **DP-AUTO-003 — Physical handoff specification** | ✅ COMPLETE — issue #36 | Superseded by successful execution of DP-WIN-001/002/003 |
 
 ### DP-WIN-001 accepted physical baseline
 
@@ -83,6 +92,10 @@ Final physical rerun passed on the Windows notebook against canonical main `85fa
 
 Acceptance evidence reported: overall `PASS`; `credentials_embedded=false`; privacy PASS; network loopback PASS; scheduler cadence PASS; all enabled sources PASS; database integrity PASS; source_count `10`; orphaned enabled legacy mirrors `0`. Five promo aggregators collected with errors `0` via the direct route and five Telegram public sources collected with errors `0` via the system route. Issue #33 is closed as completed.
 
-## Current next action
+## Current cycle status
 
-**DP-REPO-003 — GitVerse stale `main.lock` mirror unblock (issue #34) is the only remaining roadmap item and is currently an external blocker.** The GitHub-canonical hardening sequence and all physical Windows gates are complete; DP-REPO-003 can be closed only after the GitVerse/platform/operator clears the stale lock and the GitHub Actions mirror rerun passes.
+**CURRENT HARDENING CYCLE: COMPLETE.**
+
+All GitHub-canonical repository/release tasks, support/security/recovery/QA tasks, customer documentation tasks and required physical Windows gates are complete. DP-REPO-003 is deliberately deferred as a non-blocking recovery-replica concern and is not part of customer acceptance.
+
+The validated customer installer from the final physical DP-WIN-003 baseline has SHA-256 `EDDE6B75579D12BE86751CA60F1C9EAF3F391BBBF618FD9853E4CC28BB0C3AD0`. The customer delivery was sent on 2026-08-18. Further product work should proceed in a new roadmap cycle driven by customer feedback and separately prioritized enhancements rather than reopening completed hardening gates.
