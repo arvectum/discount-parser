@@ -1,0 +1,121 @@
+name: DP-WIN-001 R4 canonical artifact
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ops/dp-win-001-r4-canonical-artifact
+    paths:
+      - .github/workflows/dp-win-001-r4-canonical-artifact.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-publish:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact canonical main source
+        uses: actions/checkout@v4
+        with:
+          ref: 4496e6c8e42ce7af3e3fb50667d1ec913eb52415
+          fetch-depth: 0
+
+      - name: Verify exact source
+        shell: pwsh
+        run: |
+          $sha = (& git rev-parse HEAD).Trim()
+          if ($sha -ne '4496e6c8e42ce7af3e3fb50667d1ec913eb52415') {
+            throw "Wrong source SHA: $sha"
+          }
+          if (git status --porcelain) { throw 'Canonical checkout is dirty' }
+
+      - name: Read controlled build manifest
+        id: manifest
+        shell: pwsh
+        run: |
+          $manifest = Get-Content packaging/windows/build-manifest.json -Raw | ConvertFrom-Json
+          "python_version=$($manifest.python_version)" >> $env:GITHUB_OUTPUT
+          "pip_version=$($manifest.pip_version)" >> $env:GITHUB_OUTPUT
+          "inno_version=$($manifest.inno_setup_version)" >> $env:GITHUB_OUTPUT
+          "python_hash_seed=$($manifest.python_hash_seed)" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.manifest.outputs.python_version }}
+          cache: pip
+          cache-dependency-path: requirements/windows-build.lock
+
+      - name: Set deterministic build environment
+        shell: pwsh
+        run: |
+          $epoch = (& git show -s --format=%ct HEAD).Trim()
+          if (-not $epoch) { throw 'Cannot derive source commit timestamp' }
+          "PYTHONHASHSEED=${{ steps.manifest.outputs.python_hash_seed }}" >> $env:GITHUB_ENV
+          "SOURCE_DATE_EPOCH=$epoch" >> $env:GITHUB_ENV
+
+      - name: Install exact Python build closure
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade "pip==${{ steps.manifest.outputs.pip_version }}"
+          python -m pip install --no-deps --only-binary=:all: -r requirements/windows-build.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+          python -m pip check
+
+      - name: Ensure exact Inno Setup compiler
+        shell: pwsh
+        run: ./scripts/ensure_inno_setup.ps1 -Version "${{ steps.manifest.outputs.inno_version }}"
+
+      - name: Build exact-main installer
+        shell: pwsh
+        run: ./scripts/build_windows_ci.ps1
+
+      - name: Exercise stale worker replacement
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "dp-win-001-r4-worker\worker-overwrite.json"
+          ./scripts/windows_worker_overwrite_acceptance.ps1 `
+            -InstallerPath "delivery\DiscountParser-Setup.exe" `
+            -EvidenceOutput $evidence
+
+      - name: Exercise poisoned previous install directory
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "dp-win-001-r4-previous-dir\previous-dir-poisoning.json"
+          ./scripts/windows_previous_dir_poisoning_acceptance.ps1 `
+            -InstallerPath "delivery\DiscountParser-Setup.exe" `
+            -EvidenceOutput $evidence
+
+      - name: Write exact artifact identity
+        shell: pwsh
+        run: |
+          $installer = 'delivery/DiscountParser-Setup.exe'
+          $worker = 'delivery/app/DiscountParserWorker.exe'
+          $installerHash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          $workerHash = (Get-FileHash $worker -Algorithm SHA256).Hash.ToLowerInvariant()
+          $installerSize = (Get-Item $installer).Length
+          $workerSize = (Get-Item $worker).Length
+          @(
+            'source_sha=4496e6c8e42ce7af3e3fb50667d1ec913eb52415',
+            "installer_sha256=$installerHash",
+            "installer_size_bytes=$installerSize",
+            "worker_sha256=$workerHash",
+            "worker_size_bytes=$workerSize"
+          ) | Set-Content delivery/dp-win-001-r4-identity.txt -Encoding ascii
+          Get-Content delivery/dp-win-001-r4-identity.txt
+
+      - name: Upload exact-main installer and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: dp-win-001-r4-canonical-4496e6c8
+          path: |
+            delivery/DiscountParser-Setup.exe
+            delivery/app/DiscountParserWorker.exe
+            delivery/windows-build-provenance.json
+            delivery/dp-win-001-r4-identity.txt
+            ${{ runner.temp }}/dp-win-001-r4-worker/**
+            ${{ runner.temp }}/dp-win-001-r4-previous-dir/**
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
