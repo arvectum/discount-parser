@@ -72,11 +72,14 @@ jobs:
 
       - name: Build exact-main installer
         shell: pwsh
-        run: ./scripts/build_windows_ci.ps1
+        run: |
+          $env:GITHUB_SHA = '4496e6c8e42ce7af3e3fb50667d1ec913eb52415'
+          ./scripts/build_windows_ci.ps1
 
       - name: Exercise stale worker replacement
         shell: pwsh
         run: |
+          $env:GITHUB_SHA = '4496e6c8e42ce7af3e3fb50667d1ec913eb52415'
           $evidence = Join-Path $env:RUNNER_TEMP "dp-win-001-r4-worker\worker-overwrite.json"
           ./scripts/windows_worker_overwrite_acceptance.ps1 `
             -InstallerPath "delivery\DiscountParser-Setup.exe" `
@@ -85,6 +88,7 @@ jobs:
       - name: Exercise poisoned previous install directory
         shell: pwsh
         run: |
+          $env:GITHUB_SHA = '4496e6c8e42ce7af3e3fb50667d1ec913eb52415'
           $evidence = Join-Path $env:RUNNER_TEMP "dp-win-001-r4-previous-dir\previous-dir-poisoning.json"
           ./scripts/windows_previous_dir_poisoning_acceptance.ps1 `
             -InstallerPath "delivery\DiscountParser-Setup.exe" `
@@ -106,6 +110,10 @@ jobs:
             "worker_sha256=$workerHash",
             "worker_size_bytes=$workerSize"
           ) | Set-Content delivery/dp-win-001-r4-identity.txt -Encoding ascii
+          $provenance = Get-Content delivery/windows-build-provenance.json -Raw | ConvertFrom-Json
+          if ([string]$provenance.source_sha -ne '4496e6c8e42ce7af3e3fb50667d1ec913eb52415') {
+            throw "Build provenance source SHA mismatch: $($provenance.source_sha)"
+          }
           Get-Content delivery/dp-win-001-r4-identity.txt
 
       - name: Upload exact-main installer and evidence
