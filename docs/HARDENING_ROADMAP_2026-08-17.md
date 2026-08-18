@@ -53,7 +53,7 @@ The accepted repository-only batch passed on head `2e46aa075905da8a91fb1daa90b22
 | --- | --- | --- | --- |
 | 18 | **DP-WIN-001 — Real installed Windows/customer acceptance** | ✅ COMPLETE — issue #31 | Windows notebook + human operator |
 | 19 | **DP-WIN-002 — Real Telegram E2E** | ✅ COMPLETE — issue #32 | Windows notebook; real bot/channel |
-| 20 | **DP-WIN-003 — Real source/network sweep** | 🟡 IN PROGRESS — issue #33 / PR #50 | Windows notebook; real network/sources |
+| 20 | **DP-WIN-003 — Real source/network sweep** | ✅ COMPLETE — issue #33 / PRs #50, #51 | Windows notebook; real network/sources |
 
 ### DP-WIN-001 accepted physical baseline
 
@@ -73,14 +73,16 @@ Windows initially marked the downloaded installer/runner with `Zone.Identifier`;
 
 Evidence file `acceptance/dp-win-002-real-telegram-e2e.json` reported `PASS`, `credentials_embedded=false`, and passed the privacy check. No code/repository changes were made during the physical gate and no secrets were printed. Issue #32 is closed as completed.
 
-### DP-WIN-003 repository preparation
+### DP-WIN-003 accepted physical baseline
 
-PR #50 adds the physical acceptance harness and canonical installed command `DiscountParserWorker.exe source-network-sweep`. The harness creates a database backup, validates database integrity before/after the sweep, inventories every actually enabled production source, performs sanitized direct/proxy/system reachability diagnostics, runs the real legacy/registry collection path, records the product router's observed route, validates scheduler cadence and writes privacy-gated evidence to `acceptance/dp-win-003-real-source-network-sweep.json`.
+PR #50 added the canonical installed command `DiscountParserWorker.exe source-network-sweep`, real legacy/registry collection, sanitized direct/proxy/system reachability diagnostics, observed production route evidence, database backup/integrity checks, scheduler cadence validation and privacy-gated evidence. It also fixed the registry scheduler cadence defect so `check_interval_minutes` is honored by scheduled collection while targeted/manual collection remains immediate.
 
-Implementation also fixed a cadence defect found during DP-WIN-003: registry `check_interval_minutes` existed but the scheduled batch did not honor it. Background registry collection now skips sources that are not yet due; explicit targeted/manual collection remains immediate.
+Physical run #1 exposed a real upgrade-state defect: an enabled orphaned `legacy_adapter` mirror could remain in the registry after its YAML key was removed or renamed. PR #51 added upgrade-safe reconciliation that retires only orphaned `legacy_adapter` rows and explicitly preserves user-owned nonlegacy collectors.
 
-Repository CI/merge do not complete DP-WIN-003. Issue #33 remains open until the installed post-merge build returns `PASS` on the physical Windows notebook against the real customer-network/source contour with `credentials_embedded=false`.
+Final physical rerun passed on the Windows notebook against canonical main `85fa00761c8ee41b4d057e62fa07458c1030fb93`, tree `e7092f713c266d5e1f32b3c243667efaa3659b25`, installer SHA-256 `EDDE6B75579D12BE86751CA60F1C9EAF3F391BBBF618FD9853E4CC28BB0C3AD0`, and installed Worker SHA-256 `D4E1D574C7B120BF94D61AA36A0D953194CE87D3F40CF8A9A6C968CE2C0B26B7`.
+
+Acceptance evidence reported: overall `PASS`; `credentials_embedded=false`; privacy PASS; network loopback PASS; scheduler cadence PASS; all enabled sources PASS; database integrity PASS; source_count `10`; orphaned enabled legacy mirrors `0`. Five promo aggregators collected with errors `0` via the direct route and five Telegram public sources collected with errors `0` via the system route. Issue #33 is closed as completed.
 
 ## Current next action
 
-**Complete DP-WIN-003 repository gates, merge PR #50, then run the physical Windows command `DiscountParserWorker.exe source-network-sweep` on the installed post-merge build.** Close issue #33 only after sanitized evidence reports full PASS.
+**DP-REPO-003 — GitVerse stale `main.lock` mirror unblock (issue #34) is the only remaining roadmap item and is currently an external blocker.** The GitHub-canonical hardening sequence and all physical Windows gates are complete; DP-REPO-003 can be closed only after the GitVerse/platform/operator clears the stale lock and the GitHub Actions mirror rerun passes.
