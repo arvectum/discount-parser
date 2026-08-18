@@ -22,41 +22,40 @@ jobs:
       GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Wait for automatic mirror and verify canonical refs
+      - name: Wait for full automatic mirror parity
         shell: bash
         run: |
           set -euo pipefail
           remote="https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/${GITVERSE_ORG}/${GITVERSE_REPOSITORY}.git"
-          remote_main=""
-
-          # The mirror workflow runs independently on the same push. Give it a
-          # bounded window to finish, then require exact main equality.
-          for attempt in $(seq 1 18); do
-            remote_main="$(git ls-remote "$remote" refs/heads/main | awk '{print $1}')"
-            if test "$remote_main" = "$GITHUB_SHA"; then
-              break
-            fi
-            test "$attempt" != "18" || break
-            sleep 5
-          done
-
-          result=PASS
-          test "$remote_main" = "$GITHUB_SHA" || result=FAIL
 
           git clone --mirror \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" canonical.git
+          git --git-dir=canonical.git for-each-ref \
+            --format='%(objectname) %(refname)' refs/heads refs/tags | sort > canonical.txt
 
-          missing_or_mismatched=0
-          while read -r sha ref; do
-            remote_sha="$(git ls-remote "$remote" "$ref" | awk '{print $1}')"
-            if test "$remote_sha" != "$sha"; then
-              echo "Mismatch: $ref GitHub=$sha GitVerse=${remote_sha:-MISSING}"
-              missing_or_mismatched=$((missing_or_mismatched + 1))
+          result=FAIL
+          remote_main=""
+          missing_count=-1
+
+          # The normal mirror pushes main first and then the remaining branches
+          # and tags. Wait for the whole canonical ref set, not merely main, so
+          # the verifier cannot race the mirror's non-main push loop.
+          for attempt in $(seq 1 24); do
+            git ls-remote --refs "$remote" 'refs/heads/*' 'refs/tags/*' \
+              | awk '{print $1 " " $2}' | sort > mirror.txt
+            remote_main="$(awk '$2 == "refs/heads/main" {print $1}' mirror.txt)"
+            comm -23 canonical.txt mirror.txt > missing.txt
+            missing_count="$(wc -l < missing.txt | tr -d ' ')"
+
+            if test "$remote_main" = "$GITHUB_SHA" && test "$missing_count" = 0; then
+              result=PASS
+              break
             fi
-          done < <(git --git-dir=canonical.git for-each-ref \
-            --format='%(objectname) %(refname)' refs/heads refs/tags)
 
-          test "$missing_or_mismatched" = 0 || result=FAIL
+            if test "$attempt" != "24"; then
+              sleep 5
+            fi
+          done
 
           cat > report.md <<EOF
           DP-REPO-003 automatic mirror acceptance: **${result}**
@@ -64,11 +63,22 @@ jobs:
           - canonical GitHub main: \`${GITHUB_SHA}\`
           - GitVerse mirror main: \`${remote_main:-MISSING}\`
           - target: \`${GITVERSE_ORG}/${GITVERSE_REPOSITORY}\`
-          - all canonical GitHub branches/tags present at identical SHAs: $([ "$missing_or_mismatched" = 0 ] && echo YES || echo NO)
+          - all canonical GitHub branches/tags present at identical SHAs: $([ "$missing_count" = 0 ] && echo YES || echo NO)
+          - unresolved canonical refs: \`${missing_count}\`
           - force/prune/delete used by verifier: NO / NO / NO
 
           This verifier is read-only against GitVerse and validates the normal automatic mirror workflow, not the bootstrap workflow.
           EOF
+
+          if test "$result" != PASS; then
+            {
+              echo
+              echo 'Unresolved canonical refs:'
+              echo '```text'
+              cat missing.txt
+              echo '```'
+            } >> report.md
+          fi
 
           gh issue comment 34 --repo "$GITHUB_REPOSITORY" --body-file report.md
           test "$result" = PASS
