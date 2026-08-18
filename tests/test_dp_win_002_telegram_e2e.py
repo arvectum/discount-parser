@@ -18,6 +18,16 @@ def test_channel_fingerprint_does_not_expose_channel_identifier() -> None:
     assert channel not in fingerprint
 
 
+def test_safe_error_redacts_exact_runtime_token_and_channel() -> None:
+    token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+    channel = "@private-acceptance-channel"
+    error = RuntimeError(f"Telegram failed for {channel} with token {token}")
+    rendered = telegram_e2e._safe_error(error, token=token, channel_id=channel)
+    assert token not in rendered
+    assert channel not in rendered
+    assert "REDACTED" in rendered
+
+
 def test_real_e2e_contract_covers_identity_manual_retry_autopost_and_cleanup() -> None:
     source = HARNESS.read_text(encoding="utf-8")
     required = (
@@ -34,6 +44,7 @@ def test_real_e2e_contract_covers_identity_manual_retry_autopost_and_cleanup() -
         "_delete_probe_offer(offer_id)",
         "delete_message",
         "credentials_embedded\": False",
+        "_safe_error(exc, token=token, channel_id=channel_id)",
     )
     for token in required:
         assert token in source
