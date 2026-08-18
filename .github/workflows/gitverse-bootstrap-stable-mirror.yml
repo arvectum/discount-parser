@@ -1,0 +1,106 @@
+name: Bootstrap stable GitVerse mirror
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/gitverse-bootstrap-stable-mirror.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: gitverse-stable-mirror-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+      OWNER: arvectum
+      TARGET: discount-parser-github-mirror
+      API: https://api.gitverse.ru
+    steps:
+      - name: Create or reuse clean stable mirror and synchronize refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage=init
+          result=FAIL
+          repo_api=NA
+          create_api=NA
+          canonical_main=UNKNOWN
+          mirror_main=UNKNOWN
+          accept='Accept: application/vnd.gitverse.object+json;version=latest'
+          auth="Authorization: Bearer ${GITVERSE_TOKEN}"
+          json='Content-Type: application/json'
+
+          report() {
+            rc=$?
+            set +e
+            cat > report.md <<EOF
+          DP-REPO-003 stable-mirror bootstrap: **${result}**
+
+          - stage: \`${stage}\`
+          - run: \`${GITHUB_RUN_ID}\`
+          - target: \`${OWNER}/${TARGET}\`
+          - target API before bootstrap: \`${repo_api}\`
+          - create API: \`${create_api}\`
+          - canonical GitHub main: \`${canonical_main}\`
+          - GitVerse mirror main: \`${mirror_main}\`
+          - exact branches/tags parity required: YES
+          - force/prune/delete: NO / NO / NO
+          EOF
+            gh issue comment 34 --repo "$GITHUB_REPOSITORY" --body-file report.md || true
+            exit "$rc"
+          }
+          trap report EXIT
+
+          stage=validate
+          test -n "$GITVERSE_TOKEN"
+
+          stage=inspect_target
+          repo_api="$(curl -sS -o target.json -w '%{http_code}' -H "$auth" -H "$accept" \
+            "$API/repos/$OWNER/$TARGET")"
+          if test "$repo_api" = 404; then
+            stage=create_target
+            printf '%s' '{"name":"discount-parser-github-mirror","description":"Canonical GitHub mirror for Discount Parser","private":false,"default_branch":"main","auto_init":false}' > create.json
+            create_api="$(curl -sS -o created.json -w '%{http_code}' -X POST \
+              -H "$auth" -H "$accept" -H "$json" --data-binary @create.json "$API/user/repos")"
+            test "$create_api" = 201
+          else
+            test "$repo_api" = 200
+            create_api=NOT_NEEDED
+          fi
+
+          stage=clone_canonical
+          git clone --mirror "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" canonical.git
+          canonical_main="$(git --git-dir=canonical.git rev-parse refs/heads/main)"
+
+          stage=wait_target
+          cd canonical.git
+          git remote add gitverse "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/$OWNER/$TARGET.git"
+          for n in 1 2 3 4 5 6 7 8 9 10; do
+            if git ls-remote gitverse >/dev/null 2>&1; then break; fi
+            test "$n" != 10
+            sleep 2
+          done
+
+          stage=push_canonical_refs
+          git push gitverse --all
+          git push gitverse --tags
+
+          stage=verify_exact_refs
+          git for-each-ref --format='%(objectname) %(refname)' refs/heads refs/tags | sort > ../canonical.txt
+          git ls-remote --refs gitverse 'refs/heads/*' 'refs/tags/*' | awk '{print $1 " " $2}' | sort > ../mirror.txt
+          diff -u ../canonical.txt ../mirror.txt
+          mirror_main="$(git ls-remote gitverse refs/heads/main | awk '{print $1}')"
+          test "$mirror_main" = "$canonical_main"
+          cd ..
+
+          stage=complete
+          result=PASS
