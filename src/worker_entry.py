@@ -10,6 +10,7 @@ from alembic import command
 from alembic.config import Config
 
 from src.jobs.scheduler import run_scheduler
+from src.modules.source_registry.image_profiles import install_profile_image_extraction
 from src.modules.source_registry.seed import seed_registry
 from src.qa.doctor import build_doctor_report
 from src.qa.operational_status import build_operational_status
@@ -129,6 +130,7 @@ def source_network_sweep() -> int:
 def main() -> int:
     _configure_console_encoding()
     _prepare_runtime_directory()
+    install_profile_image_extraction()
     command_name = sys.argv[1] if len(sys.argv) > 1 else ''
     if command_name == 'bot':
         run_bot()
