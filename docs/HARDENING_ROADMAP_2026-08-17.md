@@ -2,12 +2,13 @@
 
 **Canonical repository:** `arvectum/discount-parser`  
 **Canonical branch:** `main`  
-**Updated:** 2026-08-17  
+**Updated:** 2026-08-18  
 **Execution priority:** ChatGPT + GitHub/GitHub Actions first; physical Windows/OpenCode only where real machine, credentials or network are required.
 
 ## Status legend
 
-- ✅ COMPLETE — implementation and required CI acceptance passed.
+- ✅ COMPLETE — implementation and required CI/physical acceptance passed.
+- ⏳ NEXT — next roadmap action, not started yet.
 - ⏳ DEFERRED — intentionally waiting for its prerequisite/local gate.
 - ⛔ EXTERNAL BLOCKER — requires an external platform/operator action.
 
@@ -45,16 +46,24 @@ The accepted repository-only batch passed on head `2e46aa075905da8a91fb1daa90b22
 | 16 | DP-DOC-001 — Customer manual | ✅ COMPLETE — issue #28 | `docs/CUSTOMER_MANUAL_RU.md` |
 | 17 | DP-DOC-002 — Troubleshooting guide | ✅ COMPLETE — issue #29 | `docs/TROUBLESHOOTING_RU.md` |
 
-## Physical Windows gates — local stop point
+## Physical Windows gates
 
 | Order | Task | Status | Where |
 | --- | --- | --- | --- |
-| 18 | **DP-WIN-001 — Real installed Windows/customer acceptance** | ⏳ NEXT — issue #31 | Windows notebook + OpenCode / human operator |
-| 19 | DP-WIN-002 — Real Telegram E2E | ⏳ DEFERRED — issue #32 | Windows notebook; real bot/channel |
+| 18 | **DP-WIN-001 — Real installed Windows/customer acceptance** | ✅ COMPLETE — issue #31 | Windows notebook + human operator |
+| 19 | **DP-WIN-002 — Real Telegram E2E** | ⏳ NEXT — issue #32 | Windows notebook; real bot/channel |
 | 20 | DP-WIN-003 — Real source/network sweep | ⏳ DEFERRED — issue #33 | Windows notebook; real network/sources |
 
-DP-WIN-002 starts only after DP-WIN-001 passes; DP-WIN-003 starts only after DP-WIN-002 passes.
+### DP-WIN-001 accepted physical baseline
+
+Physical acceptance passed against canonical source `4496e6c8e42ce7af3e3fb50667d1ec913eb52415` and installer SHA-256 `1426d7bba01cb3c609dc9ee4fae66e6c9825d4c4aa4a94764145be785e37190b`.
+
+Accepted evidence includes: canonical installed Worker identity `d12bc6eb89765c98eadd999422dedd8c17c619b4cbcacae26110aedb50e20288`; `doctor`, `status-json`, `db-status`; Start Menu and web UI; `/system/status.json`; support-bundle privacy; DB backup; secret-free settings export/import roundtrip; restart; same-version reinstall; uninstall payload/shortcut cleanup; clean reinstall; final restart; evidence privacy.
+
+The earlier R3/R4 stale-Worker failures were diagnosed as a test-harness lifecycle error: OpenCode timed out/terminated interactive Inno Setup before completion. The same canonical installer completed normally in a human-owned PowerShell process and replaced the stale Worker successfully. Installer/uninstaller lifecycle checks on physical Windows must therefore be human-owned or otherwise use a runner that waits for true process completion without an external timeout.
+
+DP-WIN-002 starts only after DP-WIN-001 passes; that prerequisite is now satisfied. DP-WIN-003 starts only after DP-WIN-002 passes.
 
 ## Current next action
 
-**DP-WIN-001 — stop autonomous repository work and execute the prepared OpenCode specification on the physical Windows notebook.**
+**DP-WIN-002 — Real Telegram E2E. Intentionally not started in the DP-WIN-001 completion session.**
