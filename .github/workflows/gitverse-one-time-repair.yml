@@ -1,0 +1,210 @@
+name: One-time GitVerse mirror repair
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/gitverse-one-time-repair.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitverse-one-time-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GITVERSE_ORG: arvectum
+      GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
+      GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+      TEMP_REPOSITORY: discount-parser-mirror-replacement-20260818
+      ARCHIVE_REPOSITORY: discount-parser-stale-main-lock-20260818
+      API_BASE: https://api.gitverse.ru
+    steps:
+      - name: Validate configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GITVERSE_TOKEN" || { echo "::error::GITVERSE_TOKEN is missing"; exit 1; }
+          test -n "$GITVERSE_REPOSITORY" || { echo "::error::GITVERSE_REPO is missing"; exit 1; }
+          test "$GITVERSE_REPOSITORY" = "discount-parser" || { echo "::error::Unexpected GitVerse repository target"; exit 1; }
+
+      - name: Clone canonical GitHub repository
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git clone --mirror \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            canonical.git
+
+      - name: Preflight GitVerse API, lineage and replacement names
+        shell: bash
+        run: |
+          set -euo pipefail
+          accept='Accept: application/vnd.gitverse.object+json;version=latest'
+          auth="Authorization: Bearer ${GITVERSE_TOKEN}"
+
+          status="$(curl -sS -o old-repo.json -w '%{http_code}' \
+            -H "$auth" -H "$accept" \
+            "$API_BASE/repos/$GITVERSE_ORG/$GITVERSE_REPOSITORY")"
+          test "$status" = "200" || { echo "::error::GitVerse repository API preflight failed: HTTP $status"; exit 1; }
+
+          python - <<'PY'
+          import json
+          repo = json.load(open('old-repo.json', encoding='utf-8'))
+          perms = repo.get('permissions') or {}
+          if not perms.get('admin'):
+              raise SystemExit('GitVerse token/user does not have repository admin permission')
+          if repo.get('name') != 'discount-parser':
+              raise SystemExit('Unexpected GitVerse repository identity')
+          print(f"GitVerse API admin preflight PASS; private={bool(repo.get('private'))}")
+          PY
+
+          for candidate in "$TEMP_REPOSITORY" "$ARCHIVE_REPOSITORY"; do
+            candidate_status="$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "$auth" -H "$accept" \
+              "$API_BASE/repos/$GITVERSE_ORG/$candidate")"
+            if test "$candidate_status" = "200"; then
+              echo "::error::Safety name already exists on GitVerse: $candidate"
+              exit 1
+            fi
+            test "$candidate_status" = "404" || { echo "::error::Unexpected GitVerse API response for $candidate: HTTP $candidate_status"; exit 1; }
+          done
+
+          cd canonical.git
+          git remote add gitverse-old \
+            "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/${GITVERSE_ORG}/${GITVERSE_REPOSITORY}.git"
+          git fetch --no-tags gitverse-old refs/heads/main:refs/remotes/gitverse-old/main
+          git merge-base --is-ancestor refs/remotes/gitverse-old/main refs/heads/main || {
+            echo "::error::Existing GitVerse main is not an ancestor of canonical GitHub main"
+            exit 1
+          }
+          echo "Existing GitVerse main lineage PASS"
+
+      - name: Build clean replacement, verify, and cut over without deleting old repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          accept='Accept: application/vnd.gitverse.object+json;version=latest'
+          auth="Authorization: Bearer ${GITVERSE_TOKEN}"
+          content='Content-Type: application/json'
+          old_renamed=0
+          replacement_renamed=0
+
+          rollback_cutover() {
+            set +e
+            if test "$replacement_renamed" = "1"; then
+              failed_name="${TEMP_REPOSITORY}-failed-${GITHUB_RUN_ID}"
+              curl -sS -X PATCH \
+                -H "$auth" -H "$accept" -H "$content" \
+                -d "{\"name\":\"${failed_name}\"}" \
+                "$API_BASE/repos/$GITVERSE_ORG/$GITVERSE_REPOSITORY" >/dev/null || true
+            fi
+            if test "$old_renamed" = "1"; then
+              curl -sS -X PATCH \
+                -H "$auth" -H "$accept" -H "$content" \
+                -d "{\"name\":\"${GITVERSE_REPOSITORY}\"}" \
+                "$API_BASE/repos/$GITVERSE_ORG/$ARCHIVE_REPOSITORY" >/dev/null || true
+            fi
+          }
+
+          python - <<'PY'
+          import json
+          old = json.load(open('old-repo.json', encoding='utf-8'))
+          payload = {
+              'name': 'discount-parser-mirror-replacement-20260818',
+              'description': old.get('description') or 'GitHub canonical mirror for Discount Parser',
+              'private': bool(old.get('private')),
+              'default_branch': 'main',
+              'auto_init': False,
+              'allow_squash_merge': bool(old.get('allow_squash_merge', True)),
+              'allow_merge_commit': bool(old.get('allow_merge_commit', True)),
+              'allow_rebase_merge': bool(old.get('allow_rebase_merge', True)),
+              'delete_branch_on_merge': bool(old.get('delete_branch_on_merge', False)),
+          }
+          json.dump(payload, open('create-replacement.json', 'w', encoding='utf-8'))
+          PY
+
+          create_status="$(curl -sS -o replacement.json -w '%{http_code}' -X POST \
+            -H "$auth" -H "$accept" -H "$content" \
+            --data-binary @create-replacement.json \
+            "$API_BASE/orgs/$GITVERSE_ORG/repos")"
+          test "$create_status" = "201" || { echo "::error::Could not create clean GitVerse replacement: HTTP $create_status"; exit 1; }
+
+          cd canonical.git
+          git remote add gitverse-new \
+            "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/${GITVERSE_ORG}/${TEMP_REPOSITORY}.git"
+
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if git ls-remote gitverse-new >/dev/null 2>&1; then
+              break
+            fi
+            test "$attempt" != "10" || { echo "::error::Replacement GitVerse repository did not become cloneable"; exit 1; }
+            sleep 2
+          done
+
+          git push gitverse-new --all
+          git push gitverse-new --tags
+
+          git for-each-ref --format='%(objectname) %(refname)' refs/heads refs/tags | sort > ../canonical-refs.txt
+          git ls-remote --refs gitverse-new 'refs/heads/*' 'refs/tags/*' | awk '{print $1 " " $2}' | sort > ../replacement-refs.txt
+          diff -u ../canonical-refs.txt ../replacement-refs.txt
+          test "$(git rev-parse refs/heads/main)" = "$(git ls-remote gitverse-new refs/heads/main | awk '{print $1}')"
+          cd ..
+
+          old_rename_status="$(curl -sS -o archived-old.json -w '%{http_code}' -X PATCH \
+            -H "$auth" -H "$accept" -H "$content" \
+            -d "{\"name\":\"${ARCHIVE_REPOSITORY}\"}" \
+            "$API_BASE/repos/$GITVERSE_ORG/$GITVERSE_REPOSITORY")"
+          test "$old_rename_status" = "200" || { echo "::error::Could not archive stale GitVerse repository: HTTP $old_rename_status"; exit 1; }
+          old_renamed=1
+
+          replacement_rename_status="$(curl -sS -o final-repo.json -w '%{http_code}' -X PATCH \
+            -H "$auth" -H "$accept" -H "$content" \
+            -d "{\"name\":\"${GITVERSE_REPOSITORY}\"}" \
+            "$API_BASE/repos/$GITVERSE_ORG/$TEMP_REPOSITORY")"
+          if test "$replacement_rename_status" != "200"; then
+            echo "::error::Could not move verified replacement into canonical mirror name: HTTP $replacement_rename_status"
+            rollback_cutover
+            exit 1
+          fi
+          replacement_renamed=1
+
+          cd canonical.git
+          git remote remove gitverse-new
+          git remote add gitverse-final \
+            "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/${GITVERSE_ORG}/${GITVERSE_REPOSITORY}.git"
+          test "$(git rev-parse refs/heads/main)" = "$(git ls-remote gitverse-final refs/heads/main | awk '{print $1}')" || {
+            echo "::error::Final GitVerse main does not equal canonical GitHub main"
+            cd ..
+            rollback_cutover
+            exit 1
+          }
+          git ls-remote --refs gitverse-final 'refs/heads/*' 'refs/tags/*' | awk '{print $1 " " $2}' | sort > ../final-refs.txt
+          cd ..
+          diff -u canonical-refs.txt final-refs.txt || {
+            echo "::error::Final GitVerse branch/tag set does not exactly match canonical GitHub"
+            rollback_cutover
+            exit 1
+          }
+
+          replacement_renamed=0
+          old_renamed=0
+          echo "GitVerse clean replacement cutover PASS"
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo '### GitVerse one-time repair PASS' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Canonical GitHub: \`${GITHUB_REPOSITORY}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Active GitVerse mirror: \`${GITVERSE_ORG}/${GITVERSE_REPOSITORY}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Preserved stale repository: \`${GITVERSE_ORG}/${ARCHIVE_REPOSITORY}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo '- Active mirror branches/tags exactly match canonical GitHub.' >> "$GITHUB_STEP_SUMMARY"
+          echo '- No force-push, prune, ref deletion, or repository deletion was used.' >> "$GITHUB_STEP_SUMMARY"
