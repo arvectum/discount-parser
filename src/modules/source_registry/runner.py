@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
@@ -31,15 +31,18 @@ class RegistryRunResult:
     duration_seconds: float = 0.0
     error: str | None = None
 
+
 def _stored_promo_code(session, source: Source, external_id: str) -> str | None:
     offer = session.scalar(select(Offer).join(OfferSourceObservation).where(OfferSourceObservation.source_id == source.id, OfferSourceObservation.external_id == external_id))
     value = str(offer.promo_code or "").strip() if offer else ""
     return value or None
 
+
 def _resolve_promko_code(session, *, source: RegisteredSource, legacy_source: Source, payload, item_created: bool, metadata: dict, result: RegistryRunResult) -> str | None:
     coupon_id = str(metadata.get("promko_coupon_id") or "").strip()
     explicit = str(metadata.get("promo_code") or "").strip()
-    if not coupon_id or explicit: return explicit or None
+    if not coupon_id or explicit:
+        return explicit or None
     if not item_created:
         stored = _stored_promo_code(session, legacy_source, payload.external_id or "")
         if stored:
@@ -47,14 +50,16 @@ def _resolve_promko_code(session, *, source: RegisteredSource, legacy_source: So
             return stored
         message = f"PROMKO reveal {coupon_id}: unresolved; automatic retry disabled"
         metadata.update(promko_reveal_resolved=False, promko_reveal_reused=False, promko_reveal_error=message)
-        result.errors += 1; result.error = message
+        result.errors += 1
+        result.error = message
         return None
     try:
         code = reveal_promko_code(coupon_id, referer=source.url, route=source.network_policy)
     except Exception as exc:
         message = f"PROMKO reveal {coupon_id}: {type(exc).__name__}: {exc}"
         metadata.update(promko_reveal_resolved=False, promko_reveal_reused=False, promko_reveal_error=message)
-        result.errors += 1; result.error = message
+        result.errors += 1
+        result.error = message
         return None
     metadata.update(promo_code=code, promko_reveal_resolved=True, promko_reveal_reused=False, promko_reveal_error=None)
     return code
@@ -97,6 +102,27 @@ def _keywords_for_source(session, source: RegisteredSource) -> list[SourceKeywor
     by_id = {row.id: row for row in [*global_rows, *merchant_rows, *linked] if row.id is not None}
     transient = [row for row in [*global_rows, *merchant_rows, *linked] if row.id is None]
     return [*by_id.values(), *transient]
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _is_source_due(source: RegisteredSource, *, now: datetime | None = None) -> bool:
+    """Return whether a registry source is due for the scheduled batch.
+
+    Targeted/manual collection still calls ``collect_registered_source`` directly
+    and therefore remains immediate. This guard only prevents the background
+    scheduler from polling every registry source more often than its configured
+    ``check_interval_minutes`` value.
+    """
+    if source.last_checked_at is None:
+        return True
+    current = _as_utc(now or datetime.now(UTC))
+    interval = max(1, int(source.check_interval_minutes or 1))
+    return _as_utc(source.last_checked_at) + timedelta(minutes=interval) <= current
 
 
 def collect_registered_source(source_id: int) -> RegistryRunResult:
@@ -165,7 +191,8 @@ def collect_registered_source(source_id: int) -> RegistryRunResult:
                 combined_text = "\n".join(part for part in (payload.title, payload.text) if part)
                 valid_until = extract_valid_until(str(metadata.get("valid_until") or "")) or extract_valid_until(combined_text)
                 if valid_until is not None and valid_until < datetime.now(UTC):
-                    item.processing_status = "ignored"; item.raw_payload_json = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+                    item.processing_status = "ignored"
+                    item.raw_payload_json = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
                     result.ignored += 1
                     continue
                 signal = detect_offer_signal(combined_text, keywords)
@@ -237,11 +264,18 @@ def collect_registered_source(source_id: int) -> RegistryRunResult:
 
 def collect_registered_sources(*, only_key: str | None = None) -> list[RegistryRunResult]:
     with session_scope() as session:
-        statement = select(RegisteredSource.id).where(
+        statement = select(RegisteredSource).where(
             RegisteredSource.enabled.is_(True),
             RegisteredSource.collector_type != "legacy_adapter",
         )
         if only_key:
             statement = statement.where(RegisteredSource.key == only_key)
-        source_ids = list(session.scalars(statement).all())
+        sources = list(session.scalars(statement).all())
+        now = datetime.now(UTC)
+        # A targeted call is an explicit operator action and must run immediately.
+        source_ids = [
+            int(source.id)
+            for source in sources
+            if only_key is not None or _is_source_due(source, now=now)
+        ]
     return [collect_registered_source(source_id) for source_id in source_ids]
