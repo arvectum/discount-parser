@@ -7,6 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / '.github' / 'workflows' / 'windows-installed-acceptance.yml'
 HARNESS = ROOT / 'scripts' / 'windows_installed_acceptance.ps1'
 RESILIENCE = ROOT / 'scripts' / 'windows_installer_resilience.ps1'
+WORKER_OVERWRITE = ROOT / 'scripts' / 'windows_worker_overwrite_acceptance.ps1'
+PREVIOUS_DIR = ROOT / 'scripts' / 'windows_previous_dir_poisoning_acceptance.ps1'
 INSTALLER = ROOT / 'packaging' / 'windows' / 'installer.iss'
 
 
@@ -33,6 +35,13 @@ def test_silent_installer_does_not_autolaunch_gui() -> None:
     assert '#define MyAppExeName "DiscountParser.exe"' in installer
     assert 'Filename: "{app}\\{#MyAppExeName}"; WorkingDir: "{app}"' in installer
     assert 'postinstall skipifsilent' in installer
+
+
+def test_installer_pins_the_supported_per_user_directory() -> None:
+    installer = INSTALLER.read_text(encoding='utf-8')
+    assert 'DefaultDirName={localappdata}\\DiscountParser' in installer
+    assert 'UsePreviousAppDir=no' in installer
+    assert 'DisableDirPage=yes' in installer
 
 
 def test_desktop_shortcut_is_best_effort_and_cannot_abort_payload_install() -> None:
@@ -131,9 +140,40 @@ def test_dp_win_p0_2_resilience_gate_exercises_unicode_and_shortcut_failure() ->
     assert 'Assert-ShortcutLaunchesTarget $StartMenuShortcut $blockedExe' in harness
 
 
+def test_stale_worker_gate_is_part_of_installed_acceptance() -> None:
+    workflow = WORKFLOW.read_text(encoding='utf-8')
+    harness = WORKER_OVERWRITE.read_text(encoding='utf-8')
+    assert './scripts/windows_worker_overwrite_acceptance.ps1' in workflow
+    assert '${{ runner.temp }}/dp-win-001-worker-overwrite/**' in workflow
+    assert 'stale_running_worker_replacement' in harness
+    assert 'Installed worker hash mismatch after setup' in harness
+    assert 'status-json' in harness
+    assert 'db-status' in harness
+
+
+def test_previous_install_directory_poisoning_gate_matches_physical_failure_class() -> None:
+    workflow = WORKFLOW.read_text(encoding='utf-8')
+    harness = PREVIOUS_DIR.read_text(encoding='utf-8')
+    assert './scripts/windows_previous_dir_poisoning_acceptance.ps1' in workflow
+    assert '${{ runner.temp }}/dp-win-001-previous-dir/**' in workflow
+    required = [
+        'legacy-install-dir',
+        '/DIR=$LegacyDir',
+        '$env:LOCALAPPDATA "DiscountParser"',
+        'do NOT pass /DIR',
+        'ignored_previous_app_dir',
+        'status-json',
+        'db-status',
+    ]
+    for token in required:
+        assert token in harness
+
+
 def test_acceptance_evidence_is_uploaded_even_on_failure() -> None:
     workflow = WORKFLOW.read_text(encoding='utf-8')
     assert 'if: always()' in workflow
     assert '${{ runner.temp }}/dp-ci-002/**' in workflow
     assert '${{ runner.temp }}/dp-win-p0-2/**' in workflow
+    assert '${{ runner.temp }}/dp-win-001-worker-overwrite/**' in workflow
+    assert '${{ runner.temp }}/dp-win-001-previous-dir/**' in workflow
     assert 'delivery/windows-build-provenance.json' in workflow
