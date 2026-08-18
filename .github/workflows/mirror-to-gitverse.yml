@@ -67,7 +67,7 @@ jobs:
             fi
           fi
 
-      - name: Push branches and tags to GitVerse without deletion or force
+      - name: Push canonical main and preserve divergent replica refs
         env:
           GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
           GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
@@ -75,12 +75,69 @@ jobs:
           set -euo pipefail
           cd repository.git
 
-          # GitVerse is a replica, not a source of canonical truth. Never prune
-          # remote-only refs and never force-update existing refs: unique
-          # recovery/release provenance must survive until explicit reconciliation.
+          # GitVerse is a replica, not a source of canonical truth. Never prune,
+          # delete, or force-update remote refs. Fetch replica branches into an
+          # isolated local namespace so non-main refs can be classified before
+          # deciding whether a normal fast-forward push is safe.
+          git fetch --no-tags gitverse \
+            '+refs/heads/*:refs/remotes/gitverse/*'
+
+          # main is canonical and was already lineage-checked above. A normal
+          # fast-forward update is mandatory; backend lock failures remain fatal.
           git push gitverse \
-            'refs/heads/*:refs/heads/*' \
-            'refs/tags/*:refs/tags/*'
+            refs/heads/main:refs/heads/main
+
+          skipped_branches=0
+          pushed_branches=0
+
+          while IFS= read -r branch; do
+            test "$branch" = "main" && continue
+
+            local_ref="refs/heads/${branch}"
+            remote_ref="refs/remotes/gitverse/${branch}"
+
+            if git show-ref --verify --quiet "$remote_ref"; then
+              if git merge-base --is-ancestor "$remote_ref" "$local_ref"; then
+                git push gitverse \
+                  "$local_ref:refs/heads/${branch}"
+                pushed_branches=$((pushed_branches + 1))
+              else
+                echo "::warning::Preserving divergent GitVerse branch '${branch}' without force-update."
+                skipped_branches=$((skipped_branches + 1))
+              fi
+            else
+              git push gitverse \
+                "$local_ref:refs/heads/${branch}"
+              pushed_branches=$((pushed_branches + 1))
+            fi
+          done < <(git for-each-ref --format='%(refname:strip=2)' refs/heads)
+
+          skipped_tags=0
+          pushed_tags=0
+
+          while IFS= read -r tag; do
+            local_ref="refs/tags/${tag}"
+            local_sha="$(git rev-parse "$local_ref")"
+            remote_sha="$(git ls-remote --tags --refs gitverse "$local_ref" | awk '{print $1}')"
+
+            if test -z "$remote_sha"; then
+              git push gitverse \
+                "$local_ref:$local_ref"
+              pushed_tags=$((pushed_tags + 1))
+            elif test "$remote_sha" = "$local_sha"; then
+              :
+            else
+              echo "::warning::Preserving divergent GitVerse tag '${tag}' without force-update."
+              skipped_tags=$((skipped_tags + 1))
+            fi
+          done < <(git for-each-ref --format='%(refname:strip=2)' refs/tags)
+
+          {
+            echo "MIRROR_PUSHED_BRANCHES=${pushed_branches}"
+            echo "MIRROR_SKIPPED_BRANCHES=${skipped_branches}"
+            echo "MIRROR_PUSHED_TAGS=${pushed_tags}"
+            echo "MIRROR_SKIPPED_TAGS=${skipped_tags}"
+          } >> "$GITHUB_ENV"
 
       - name: Summary
         if: success()
@@ -90,6 +147,10 @@ jobs:
           echo "### GitVerse replica updated" >> "$GITHUB_STEP_SUMMARY"
           echo "- Canonical source: \`${GITHUB_REPOSITORY}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Replica target: \`arvectum/${GITVERSE_REPOSITORY}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Mode: non-destructive (no force, no prune)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Mode: non-destructive (no force, no prune, divergent replica refs preserved)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pushed non-main branches: \`${MIRROR_PUSHED_BRANCHES:-0}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Preserved divergent branches: \`${MIRROR_SKIPPED_BRANCHES:-0}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pushed new tags: \`${MIRROR_PUSHED_TAGS:-0}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Preserved divergent tags: \`${MIRROR_SKIPPED_TAGS:-0}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Trigger: \`${GITHUB_EVENT_NAME}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- SHA: \`${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
