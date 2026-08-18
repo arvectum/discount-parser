@@ -1,5 +1,5 @@
 #define MyAppName "Discount Parser"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #define MyAppExeName "DiscountParser.exe"
 #define MyWorkerExeName "DiscountParserWorker.exe"
 #define MyDesktopShortcutName "Discount Parser.lnk"
@@ -56,6 +56,79 @@ Name: "{group}\Discount Parser"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: 
 function DesktopShortcutPath(): String;
 begin
   Result := ExpandConstant('{userdesktop}\{#MyDesktopShortcutName}');
+end;
+
+procedure StopProductProcess(ImageName: String);
+var
+  ResultCode: Integer;
+begin
+  if Exec(
+    ExpandConstant('{sys}\taskkill.exe'),
+    '/F /T /IM ' + ImageName,
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode) then
+  begin
+    Log('DP-FB4: taskkill ' + ImageName + ' exit=' + IntToStr(ResultCode));
+  end
+  else
+    Log('DP-FB4: taskkill could not start for ' + ImageName);
+end;
+
+function ProbeUnlockedFile(FilePath: String): Boolean;
+var
+  ProbePath: String;
+begin
+  Result := True;
+  if not FileExists(FilePath) then
+    Exit;
+
+  ProbePath := FilePath + '.upgrade-probe';
+  if FileExists(ProbePath) then
+    DeleteFile(ProbePath);
+
+  if not RenameFile(FilePath, ProbePath) then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  if not RenameFile(ProbePath, FilePath) then
+  begin
+    Log('DP-FB4: critical: could not restore upgrade probe file ' + FilePath);
+    Result := False;
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  AppExe: String;
+  WorkerExe: String;
+begin
+  Result := '';
+  AppExe := ExpandConstant('{app}\{#MyAppExeName}');
+  WorkerExe := ExpandConstant('{app}\{#MyWorkerExeName}');
+
+  // Restart Manager normally closes the product, but customer upgrade evidence
+  // showed that a stale/background image can survive long enough for the file
+  // replacement to fail with Windows error 5. Kill only our two owned images,
+  // wait for handles to drain, then probe both files before Setup starts copying.
+  StopProductProcess('{#MyWorkerExeName}');
+  StopProductProcess('{#MyAppExeName}');
+  Sleep(1200);
+
+  if not ProbeUnlockedFile(AppExe) then
+  begin
+    Result := 'Не удалось подготовить Discount Parser к обновлению. Перезагрузите Windows и снова запустите установщик до запуска программы.';
+    Exit;
+  end;
+
+  if not ProbeUnlockedFile(WorkerExe) then
+  begin
+    Result := 'Не удалось подготовить фоновый процесс Discount Parser к обновлению. Перезагрузите Windows и снова запустите установщик.';
+    Exit;
+  end;
 end;
 
 procedure RemoveDesktopShortcutBestEffort();
