@@ -72,6 +72,8 @@ def _retire_orphaned_legacy_mirrors(session: Session, *, configured_keys: set[st
     ).all()
     retired = 0
     for row in rows:
+        if row.collector_type != "legacy_adapter":
+            continue
         if row.key in configured_keys or not row.enabled:
             continue
         row.enabled = False
