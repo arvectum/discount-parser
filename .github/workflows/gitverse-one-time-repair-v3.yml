@@ -1,0 +1,161 @@
+name: One-time GitVerse mirror repair v3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/gitverse-one-time-repair-v3.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: gitverse-one-time-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+      OWNER: arvectum
+      ACTIVE: discount-parser
+      TEMP: discount-parser-mirror-replacement-20260818
+      ARCHIVE: discount-parser-stale-main-lock-20260818
+      API: https://api.gitverse.ru
+    steps:
+      - name: Replace stale repository safely using user endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage=init; result=FAIL; canonical=UNKNOWN; final=UNKNOWN
+          user_status=NA; create_status=NA; archive_status=NA; promote_status=NA
+          old_renamed=0; new_promoted=0
+          accept='Accept: application/vnd.gitverse.object+json;version=latest'
+          auth="Authorization: Bearer ${GITVERSE_TOKEN}"
+          json='Content-Type: application/json'
+
+          rollback() {
+            set +e
+            if test "$new_promoted" = 1; then
+              failed="${TEMP}-failed-${GITHUB_RUN_ID}"
+              curl -sS -X PATCH -H "$auth" -H "$accept" -H "$json" \
+                -d "{\"name\":\"$failed\"}" "$API/repos/$OWNER/$ACTIVE" >/dev/null || true
+            fi
+            if test "$old_renamed" = 1; then
+              curl -sS -X PATCH -H "$auth" -H "$accept" -H "$json" \
+                -d "{\"name\":\"$ACTIVE\"}" "$API/repos/$OWNER/$ARCHIVE" >/dev/null || true
+            fi
+          }
+
+          report() {
+            rc=$?
+            set +e
+            if test "$rc" != 0 && { test "$old_renamed" = 1 || test "$new_promoted" = 1; }; then rollback; fi
+            cat > report.md <<EOF
+          DP-REPO-003 one-time repair v3: **${result}**
+
+          - stage: \`${stage}\`
+          - run: \`${GITHUB_RUN_ID}\`
+          - canonical GitHub main: \`${canonical}\`
+          - final GitVerse main: \`${final}\`
+          - authenticated user API: \`${user_status}\`
+          - create replacement API: \`${create_status}\`
+          - archive old API: \`${archive_status}\`
+          - promote replacement API: \`${promote_status}\`
+          - force/prune/delete: NO / NO / NO
+          EOF
+            gh issue comment 34 --repo "$GITHUB_REPOSITORY" --body-file report.md || true
+            exit "$rc"
+          }
+          trap report EXIT
+
+          stage=validate
+          test -n "$GITVERSE_TOKEN"
+
+          stage=authenticate_user
+          user_status="$(curl -sS -o user.json -w '%{http_code}' -H "$auth" -H "$accept" "$API/user")"
+          test "$user_status" = 200
+          python - <<'PY'
+          import json
+          u=json.load(open('user.json', encoding='utf-8'))
+          if u.get('login') != 'arvectum':
+              raise SystemExit(f"Unexpected GitVerse user: {u.get('login')!r}")
+          PY
+
+          stage=clone_canonical
+          git clone --mirror "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" canonical.git
+          canonical="$(git --git-dir=canonical.git rev-parse refs/heads/main)"
+
+          stage=preflight_names
+          for name in "$TEMP" "$ARCHIVE"; do
+            s="$(curl -sS -o /dev/null -w '%{http_code}' -H "$auth" -H "$accept" "$API/repos/$OWNER/$name")"
+            test "$s" = 404
+          done
+
+          stage=lineage
+          cd canonical.git
+          git remote add old "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/$OWNER/$ACTIVE.git"
+          git fetch --no-tags old refs/heads/main:refs/remotes/old/main
+          git merge-base --is-ancestor refs/remotes/old/main refs/heads/main
+          cd ..
+
+          stage=create_replacement
+          python - <<'PY'
+          import json
+          payload={
+            'name':'discount-parser-mirror-replacement-20260818',
+            'description':'GitHub canonical mirror for Discount Parser',
+            'private':False,
+            'default_branch':'main',
+            'auto_init':False
+          }
+          json.dump(payload, open('create.json','w',encoding='utf-8'))
+          PY
+          create_status="$(curl -sS -o created.json -w '%{http_code}' -X POST \
+            -H "$auth" -H "$accept" -H "$json" --data-binary @create.json "$API/user/repos")"
+          test "$create_status" = 201
+
+          stage=populate_and_verify_replacement
+          cd canonical.git
+          git remote add new "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/$OWNER/$TEMP.git"
+          for n in 1 2 3 4 5 6 7 8 9 10; do
+            git ls-remote new >/dev/null 2>&1 && break
+            test "$n" != 10
+            sleep 2
+          done
+          git push new --all
+          git push new --tags
+          git for-each-ref --format='%(objectname) %(refname)' refs/heads refs/tags | sort > ../want.txt
+          git ls-remote --refs new 'refs/heads/*' 'refs/tags/*' | awk '{print $1 " " $2}' | sort > ../got.txt
+          diff -u ../want.txt ../got.txt
+          cd ..
+
+          stage=archive_old
+          archive_status="$(curl -sS -o archived.json -w '%{http_code}' -X PATCH \
+            -H "$auth" -H "$accept" -H "$json" -d "{\"name\":\"$ARCHIVE\"}" \
+            "$API/repos/$OWNER/$ACTIVE")"
+          test "$archive_status" = 200
+          old_renamed=1
+
+          stage=promote_replacement
+          promote_status="$(curl -sS -o promoted.json -w '%{http_code}' -X PATCH \
+            -H "$auth" -H "$accept" -H "$json" -d "{\"name\":\"$ACTIVE\"}" \
+            "$API/repos/$OWNER/$TEMP")"
+          test "$promote_status" = 200
+          new_promoted=1
+
+          stage=verify_final
+          cd canonical.git
+          git remote add final "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/$OWNER/$ACTIVE.git"
+          final="$(git ls-remote final refs/heads/main | awk '{print $1}')"
+          test "$final" = "$canonical"
+          git ls-remote --refs final 'refs/heads/*' 'refs/tags/*' | awk '{print $1 " " $2}' | sort > ../final.txt
+          cd ..
+          diff -u want.txt final.txt
+
+          old_renamed=0; new_promoted=0
+          stage=complete; result=PASS
