@@ -24,15 +24,19 @@
 | 5 | DP-CI-002 — Windows installed acceptance | ✅ COMPLETE | GitHub Actions / Windows |
 | 6 | DP-CI-003 — Release gate | ✅ COMPLETE | GitHub Actions |
 | 7 | DP-WIN-P0.2 — Installer shortcut/rollback hardening | ✅ COMPLETE | GitHub Actions / Windows |
-| 8 | DP-REPO-003 — GitVerse stale `main.lock` mirror unblock | ⏳ DEFERRED / NON-BLOCKING — issue #34 closed `not planned`; mirror manual-only | GitVerse operator/platform if revisited |
+| 8 | DP-REPO-003 — GitVerse mirror recovery | ✅ COMPLETE — clean permanent mirror established and automatic sync accepted | ChatGPT + GitHub Actions + GitVerse API |
 
 ### GitVerse disposition
 
-GitHub remains the canonical repository and source of release truth. GitVerse is a recovery replica only and is not part of the Discount Parser customer/release acceptance gate.
+GitHub remains the canonical repository and source of release truth. The operational GitVerse recovery replica is now **`arvectum/discount-parser-github-mirror`**.
 
-A fresh mirror rerun on 2026-08-18 passed canonical lineage preflight and then failed only because the GitVerse backend could not create `refs/heads/main.lock` because that lock file already existed. The failure is server-side repository state, not a canonical-history or application defect.
+The historical GitVerse repository `arvectum/discount-parser` remains preserved with its stale backend `refs/heads/main.lock` state and is no longer used as a mirror target. It is not part of the customer/release acceptance path.
 
-For the current delivery cycle the mirror is intentionally manual-only. No force-push, prune, branch deletion/recreation or destructive ref reconciliation is permitted. Issue #34 records the canonical deferred decision; historical duplicate issue #7 is closed as duplicate.
+The replacement mirror was bootstrapped non-destructively on 2026-08-18. Bootstrap run `32133411341` created the clean repository through the authenticated GitVerse user API and pushed canonical GitHub branches/tags without force, prune or deletion. Bootstrap acceptance recorded exact branch/tag parity and equal `main` SHA `d383bdbf1e73c7790d30b492b1ef1ed67ebe1a55`.
+
+The permanent `.github/workflows/mirror-to-gitverse.yml` now targets `arvectum/discount-parser-github-mirror` and runs on every branch/tag push, manual dispatch and a daily safety sync. Canonical `main` remains fail-closed and fast-forward-only; divergent replica refs are preserved rather than force-updated or pruned.
+
+Final automatic-mirror acceptance then validated the **normal permanent workflow**, not the bootstrap workflow: GitHub `main` and GitVerse mirror `main` both reached `a3e56f2292304b04cefd52e2c19c2451f89a2c82`, and every canonical GitHub branch/tag was present on GitVerse at the identical SHA. Issue #34 records the evidence. A quiet read-only GitVerse mirror health workflow remains available by manual dispatch and scheduled after the daily mirror sync.
 
 ## P1 — supportability, security, recovery and QA
 
@@ -96,6 +100,6 @@ Acceptance evidence reported: overall `PASS`; `credentials_embedded=false`; priv
 
 **CURRENT HARDENING CYCLE: COMPLETE.**
 
-All GitHub-canonical repository/release tasks, support/security/recovery/QA tasks, customer documentation tasks and required physical Windows gates are complete. DP-REPO-003 is deliberately deferred as a non-blocking recovery-replica concern and is not part of customer acceptance.
+All GitHub-canonical repository/release tasks, GitVerse recovery mirroring, support/security/recovery/QA tasks, customer documentation tasks and required physical Windows gates are complete.
 
 The validated customer installer from the final physical DP-WIN-003 baseline has SHA-256 `EDDE6B75579D12BE86751CA60F1C9EAF3F391BBBF618FD9853E4CC28BB0C3AD0`. The customer delivery was sent on 2026-08-18. Further product work should proceed in a new roadmap cycle driven by customer feedback and separately prioritized enhancements rather than reopening completed hardening gates.
