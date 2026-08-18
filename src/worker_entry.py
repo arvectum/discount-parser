@@ -15,6 +15,7 @@ from src.qa.doctor import build_doctor_report
 from src.qa.operational_status import build_operational_status
 from src.qa.recovery import backup_database, database_integrity, recover_if_needed
 from src.qa.settings_portability import export_settings, import_settings
+from src.qa.source_network_sweep import run_real_source_network_sweep
 from src.qa.support_bundle import build_support_bundle
 from src.qa.telegram_e2e import run_real_telegram_e2e
 from src.shared.config import get_settings
@@ -117,6 +118,14 @@ def telegram_e2e() -> int:
     return 0 if payload.get('status') == 'PASS' else 1
 
 
+def source_network_sweep() -> int:
+    _prepare_runtime_directory()
+    output = sys.argv[2] if len(sys.argv) > 2 else None
+    payload = run_real_source_network_sweep(output)
+    print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+    return 0 if payload.get('status') == 'PASS' else 1
+
+
 def main() -> int:
     _configure_console_encoding()
     _prepare_runtime_directory()
@@ -147,6 +156,8 @@ def main() -> int:
         return support_bundle()
     if command_name == 'telegram-e2e':
         return telegram_e2e()
+    if command_name == 'source-network-sweep':
+        return source_network_sweep()
     print(f'Unknown worker command: {command_name}', file=sys.stderr)
     return 2
 
