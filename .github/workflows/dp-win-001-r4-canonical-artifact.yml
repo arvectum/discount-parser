@@ -7,6 +7,9 @@ on:
       - ops/dp-win-001-r4-canonical-artifact
     paths:
       - .github/workflows/dp-win-001-r4-canonical-artifact.yml
+  pull_request:
+    paths:
+      - .github/workflows/dp-win-001-r4-canonical-artifact.yml
 
 permissions:
   contents: read
