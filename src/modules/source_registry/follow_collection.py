@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
@@ -82,11 +83,10 @@ def install_follow_profile_collection() -> None:
             detail_soup = _clean_soup(detail_response.text)
             merchant = _merchant_from_detail(detail_soup, profile.merchant_selector, detail_page_url)
 
-            # A known-site detail adapter is preferred because it needs no CSS
-            # mapping at all. Generic sources fall back to the saved inferred
-            # profile. This is what makes Promokood category onboarding a
-            # confirm-only workflow for the customer.
-            items = self._known_site_items(source, detail_page_url, str(detail_soup))
+            # Known-site detection must look at the internal detail URL rather
+            # than the category entry URL. That makes /travel -> /o/... work
+            # without any customer-supplied selectors.
+            items = self._known_site_items(SimpleNamespace(url=detail_page_url), detail_page_url, str(detail_soup))
             if not items and source.item_selector:
                 items = self._profile_items(source, detail_soup, detail_page_url)
             if not items:
