@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 from src.modules.source_registry import assisted_setup
 from src.modules.source_registry.service import ItemPayload
@@ -51,7 +50,7 @@ def test_promokood_category_is_confirm_only_preset(monkeypatch) -> None:
     assert proposal.detail_url_contains == "/o/"
     assert proposal.discovered_detail_pages == 2
     assert proposal.can_confirm is True
-    assert proposal.item_selector is None  # preset detail adapter needs no customer CSS
+    assert proposal.item_selector is None
     assert proposal.previews[0].promo_code == "SALE20"
 
 
@@ -113,3 +112,8 @@ def test_follow_collection_allows_known_detail_adapter_without_css() -> None:
     assert "two-stage source requires a saved detail extraction profile" not in follow
     assert "SimpleNamespace(url=detail_page_url)" in follow
     assert "if not items and source.item_selector" in follow
+
+
+def test_feedback_12_windows_installer_version() -> None:
+    installer = (ROOT / "packaging" / "windows" / "installer.iss").read_text(encoding="utf-8")
+    assert '#define MyAppVersion "0.1.10"' in installer
