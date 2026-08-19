@@ -76,6 +76,26 @@ def test_source_technical_settings_are_explicitly_secondary() -> None:
     assert "CSS-селекторы, collector" in source
 
 
+def test_friendly_settings_post_precedes_legacy_generic_action_route() -> None:
+    from src.web import application
+
+    routes = list(application.app.router.routes)
+    friendly_index = next(
+        index
+        for index, route in enumerate(routes)
+        if getattr(route, "path", None) == "/sources-registry/{source_id}/settings"
+        and "POST" in set(getattr(route, "methods", set()) or set())
+    )
+    generic_index = next(
+        index
+        for index, route in enumerate(routes)
+        if getattr(route, "path", None) == "/sources-registry/{source_id}/{action}"
+        and "POST" in set(getattr(route, "methods", set()) or set())
+    )
+
+    assert friendly_index < generic_index
+
+
 def test_feedback_10_windows_installer_version() -> None:
     installer = (ROOT / "packaging" / "windows" / "installer.iss").read_text(encoding="utf-8")
-    assert '#define MyAppVersion "0.1.7"' in installer
+    assert '#define MyAppVersion "0.1.8"' in installer
