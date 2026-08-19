@@ -13,7 +13,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from src.shared.logging import redact_secrets
 from src.web.app import app
 from src.web.brand_v2 import BRAND_STYLE, brand_footer, brand_header
-from src.web.customer_hotfixes import install_customer_hotfixes, sources_registry_hotfix
+from src.web.customer_hotfixes import install_customer_hotfixes
 from src.web.management_pages import router as management_router
 from src.web.network_routes import router as network_router
 from src.web.onboarding_routes import router as onboarding_router
@@ -22,6 +22,7 @@ from src.web.review_routes import router as review_router
 from src.web.setup import is_setup_complete
 from src.web.source_registry_static_routes import router as source_registry_static_router
 from src.web.source_registry_routes import router as source_registry_router
+from src.web.source_setup_routes import friendly_registry_page, router as source_setup_router
 from src.web.system_routes import router as system_router
 from src.web.telegram_format_routes import router as telegram_format_router
 from src.web.ux_routes import router as ux_router
@@ -32,6 +33,7 @@ app.include_router(management_router)
 app.include_router(review_router)
 app.include_router(source_registry_static_router)
 app.include_router(source_registry_router)
+app.include_router(source_setup_router)
 app.include_router(system_router)
 app.include_router(network_router)
 app.include_router(onboarding_router)
@@ -39,7 +41,7 @@ app.include_router(telegram_format_router)
 app.include_router(ux_router)
 
 # Customer-facing replacements must be part of the canonical ASGI application,
-# not only the desktop launcher.  This keeps the safe Sources route active for
+# not only the desktop launcher.  This keeps upgrade-safe routes active for
 # frozen builds, tests, alternate entrypoints and any direct ASGI import.
 install_customer_hotfixes(app)
 
@@ -76,13 +78,12 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
                 return PlainTextResponse('Cross-origin request blocked', status_code=403)
 
         try:
-            # DP-CUST-007: customer evidence from the 0.1.3 frozen build proved
-            # that the legacy Sources endpoint could still be selected at
-            # runtime even though route introspection showed the replacement.
-            # Guard the exact GET path before Starlette router dispatch so the
-            # safe wrapper is guaranteed to execute in every entrypoint/build.
+            # DP-CUST-010: Sources is a customer workflow, not a developer
+            # configuration surface.  Intercept the exact GET path before
+            # Starlette dispatch so every frozen/runtime entrypoint gets the
+            # one-link auto-analysis wizard rather than CSS/collector fields.
             if request.method == 'GET' and request.url.path == '/sources-registry':
-                response = sources_registry_hotfix(
+                response = friendly_registry_page(
                     message=request.query_params.get('message'),
                     error=request.query_params.get('error'),
                 )
