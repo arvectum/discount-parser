@@ -15,6 +15,7 @@ from src.web.app import app
 from src.web.brand_v2 import BRAND_STYLE, brand_footer, brand_header
 from src.web.customer_hotfixes import install_customer_hotfixes
 from src.web.management_pages import router as management_router
+from src.web.manual_mapping_routes import router as manual_mapping_router
 from src.web.network_routes import router as network_router
 from src.web.onboarding_routes import router as onboarding_router
 from src.web.processes import process_manager
@@ -32,6 +33,9 @@ logger = logging.getLogger("src.web.application")
 app.include_router(management_router)
 app.include_router(review_router)
 app.include_router(source_registry_static_router)
+# DP-CUST-011: the one-time per-site mapping workflow owns add-auto/settings
+# before the older DP-CUST-010 auto routes and the broad legacy action route.
+app.include_router(manual_mapping_router)
 # Friendly customer routes must be registered before the legacy registry router:
 # the latter contains a broad POST /sources-registry/{source_id}/{action} route.
 # If it comes first, POST .../{id}/settings is swallowed as action="settings".
@@ -81,10 +85,9 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
                 return PlainTextResponse('Cross-origin request blocked', status_code=403)
 
         try:
-            # DP-CUST-010: Sources is a customer workflow, not a developer
-            # configuration surface.  Intercept the exact GET path before
-            # Starlette dispatch so every frozen/runtime entrypoint gets the
-            # one-link auto-analysis wizard rather than CSS/collector fields.
+            # DP-CUST-010/011: Sources stays a customer workflow.  Exact GET is
+            # still rendered by the friendly overview; site-specific mapping is
+            # reached from source settings immediately after a website is added.
             if request.method == 'GET' and request.url.path == '/sources-registry':
                 response = friendly_registry_page(
                     message=request.query_params.get('message'),
@@ -148,6 +151,15 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
         else:
             body = bytes(getattr(response, 'body', b''))
         text = body.decode('utf-8')
+        if request.method == 'GET' and request.url.path == '/sources-registry':
+            text = text.replace(
+                'Вставьте ссылку. Discount Parser сам определит тип источника, попробует найти предложения и покажет пример до добавления.',
+                'Вставьте ссылку. Для сайта Discount Parser покажет предварительный пример, а после добавления попросит один раз указать, где на странице находятся нужные поля.',
+            )
+            text = text.replace(
+                'HTML, CSS, атрибуты и другие технические параметры вводить не нужно.',
+                'Для сайтов нужна одноразовая схема полей: её можно заполнить через «Исследовать элемент → Copy selector». Номера строк HTML не используются.',
+            )
         if request.method == 'GET' and request.url.path == '/settings' and 'href="/settings/telegram-format"' not in text:
             marker = '<div class="ux-cards">'
             if marker in text:
