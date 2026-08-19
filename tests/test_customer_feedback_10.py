@@ -101,4 +101,4 @@ def test_friendly_settings_post_precedes_legacy_generic_action_route() -> None:
 
 def test_feedback_10_windows_installer_version() -> None:
     installer = (ROOT / "packaging" / "windows" / "installer.iss").read_text(encoding="utf-8")
-    assert '#define MyAppVersion "0.1.8"' in installer
+    assert '#define MyAppVersion "0.1.9"' in installer
