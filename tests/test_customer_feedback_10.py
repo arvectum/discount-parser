@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from src.modules.source_registry import auto_setup
 from src.modules.source_registry.service import ItemPayload
@@ -79,29 +80,18 @@ def test_source_technical_settings_are_explicitly_secondary() -> None:
 
 
 def test_friendly_settings_post_precedes_legacy_generic_action_route() -> None:
-    # Use a fresh app because several historical hotfix tests intentionally
-    # mutate the shared canonical router in-process. This regression verifies
-    # the order used by application.py without depending on pytest collection
-    # order or another test's route replacement side effects.
+    # Missing required `url` is intentional: if the friendly POST route wins,
+    # FastAPI validation returns 422 before touching the database. If the older
+    # generic action route wins instead, `settings` is treated as an unknown
+    # legacy action and returns a different response.
     test_app = FastAPI()
     test_app.include_router(source_setup_routes.router)
     test_app.include_router(source_registry_routes.router)
 
-    routes = list(test_app.router.routes)
-    friendly_index = next(
-        index
-        for index, route in enumerate(routes)
-        if getattr(route, "path", None) == "/sources-registry/{source_id}/settings"
-        and "POST" in set(getattr(route, "methods", set()) or set())
-    )
-    generic_index = next(
-        index
-        for index, route in enumerate(routes)
-        if getattr(route, "path", None) == "/sources-registry/{source_id}/{action}"
-        and "POST" in set(getattr(route, "methods", set()) or set())
-    )
+    with TestClient(test_app) as client:
+        response = client.post("/sources-registry/123/settings", data={})
 
-    assert friendly_index < generic_index
+    assert response.status_code == 422
 
     application_source = (ROOT / "src" / "web" / "application.py").read_text(encoding="utf-8")
     assert application_source.index("app.include_router(source_setup_router)") < application_source.index(
