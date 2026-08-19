@@ -10,6 +10,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from src.modules.source_registry.follow_collection import install_follow_profile_collection
 from src.shared.logging import redact_secrets
 from src.web.app import app
 from src.web.brand_v2 import BRAND_STYLE, brand_footer, brand_header
@@ -48,8 +49,9 @@ app.include_router(telegram_format_router)
 app.include_router(ux_router)
 
 # Customer-facing replacements must be part of the canonical ASGI application,
-# not only the desktop launcher.  This keeps upgrade-safe routes active for
+# not only the desktop launcher. This keeps upgrade-safe routes active for
 # frozen builds, tests, alternate entrypoints and any direct ASGI import.
+install_follow_profile_collection()
 install_customer_hotfixes(app)
 
 _LOCAL_HOSTS = {'127.0.0.1', 'localhost', '::1'}
@@ -70,8 +72,6 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
         if request.method == 'GET' and request.url.path == '/setup':
             return RedirectResponse('/onboarding/1', status_code=303)
 
-        # Keep the old detailed dashboard available at /advanced, but make the
-        # customer-facing root open the task-oriented home page.
         if request.method == 'GET' and request.url.path == '/' and is_setup_complete():
             suffix = f'?{request.url.query}' if request.url.query else ''
             return RedirectResponse('/home' + suffix, status_code=303)
@@ -85,9 +85,6 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
                 return PlainTextResponse('Cross-origin request blocked', status_code=403)
 
         try:
-            # DP-CUST-010/011: Sources stays a customer workflow.  Exact GET is
-            # still rendered by the friendly overview; site-specific mapping is
-            # reached from source settings immediately after a website is added.
             if request.method == 'GET' and request.url.path == '/sources-registry':
                 response = friendly_registry_page(
                     message=request.query_params.get('message'),
@@ -158,7 +155,7 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
             )
             text = text.replace(
                 'HTML, CSS, атрибуты и другие технические параметры вводить не нужно.',
-                'Для сайтов нужна одноразовая схема полей: её можно заполнить через «Исследовать элемент → Copy selector». Номера строк HTML не используются.',
+                'Для сайтов нужна одноразовая схема полей. Можно настроить как прямую страницу предложений, так и каталог: «карточка → внутренняя кнопка Все промокоды → единый шаблон страницы». Внешние кнопки активации парсер для обхода не открывает.',
             )
         if request.method == 'GET' and request.url.path == '/settings' and 'href="/settings/telegram-format"' not in text:
             marker = '<div class="ux-cards">'
