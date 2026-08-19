@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup, Tag
 
 from src.modules.source_registry.auto_setup import AutoPreviewItem, _preview, normalize_source_url
 from src.modules.source_registry.collectors import GenericWebCollector
+from src.modules.source_registry.known_site_crawl import discover_promokood_detail_urls
 from src.modules.source_registry.manual_profile import ManualProfile, normalize_manual_profile, preview_manual_profile_html
 
 
@@ -137,17 +138,12 @@ def _common_path_marker(urls: list[str]) -> str | None:
     return None
 
 
-def _promokood_category_proposal(url: str, soup: BeautifulSoup, collector: GenericWebCollector) -> AssistedSourceProposal | None:
+def _promokood_category_proposal(url: str, html_text: str, collector: GenericWebCollector) -> AssistedSourceProposal | None:
     parsed = urlparse(url)
     host = (parsed.hostname or "").casefold().removeprefix("www.")
     if host != "promokood.ru" or parsed.path.casefold().startswith("/o/"):
         return None
-    detail_urls = [
-        href
-        for href, _ in _same_host_detail_links(soup, url)
-        if urlparse(href).path.casefold().startswith("/o/")
-    ]
-    detail_urls = list(dict.fromkeys(detail_urls))
+    detail_urls = discover_promokood_detail_urls(html_text, entry_url=url, limit=500)
     if not detail_urls:
         return None
     previews: list[AutoPreviewItem] = []
@@ -165,11 +161,10 @@ def _promokood_category_proposal(url: str, soup: BeautifulSoup, collector: Gener
         strategy="preset:promokood-category",
         confidence=confidence,
         explanation=(
-            "Определён каталог Promokood. Парсер сам найдёт внутренние ссылки /o/, "
-            "откроет их и разберёт встроенным шаблоном. Внешние кнопки «Активировать» для обхода игнорируются."
+            "Определён каталог Promokood. Парсер сам найдёт внутренние страницы /o/ независимо от того, "
+            "оформлены они ссылкой, кнопкой или встроенными данными, затем разберёт их встроенным шаблоном. "
+            "Внешние кнопки «Активировать» для обхода игнорируются."
         ),
-        # Known-site preset deliberately avoids page-specific card classes.
-        # A global same-host /o/ anchor selector is substantially more stable.
         listing_item_selector=None,
         detail_link_selector='a[href*="/o/"]',
         detail_url_contains="/o/",
@@ -274,8 +269,6 @@ def _infer_direct_profile(url: str, html_text: str) -> tuple[ManualProfile | Non
         useful = [item for item in preview_items if item.title or item.promo_code or item.conditions]
         if len(useful) < 2:
             continue
-        # Do not auto-confirm a generic profile that only found headings/links.
-        # At least one benefit-bearing field must be structurally identified.
         if not (profile.promo_code_selector or profile.conditions_selector):
             continue
         previews = tuple(
@@ -302,8 +295,7 @@ def analyze_assisted_source(value: str) -> AssistedSourceProposal:
         return known
     response = collector._get(url, route="auto")
     final_url = str(response.url)
-    soup = _clean_soup(response.text)
-    preset = _promokood_category_proposal(final_url, soup, collector)
+    preset = _promokood_category_proposal(final_url, response.text, collector)
     if preset is not None:
         return preset
 
@@ -328,6 +320,7 @@ def analyze_assisted_source(value: str) -> AssistedSourceProposal:
             previews=previews,
         )
 
+    soup = _clean_soup(response.text)
     pairs = _same_host_detail_links(soup, final_url)
     likely = [href for href, _ in pairs if _PROMO_HINT_RE.search(href)]
     marker = _common_path_marker(likely)
