@@ -32,8 +32,11 @@ logger = logging.getLogger("src.web.application")
 app.include_router(management_router)
 app.include_router(review_router)
 app.include_router(source_registry_static_router)
-app.include_router(source_registry_router)
+# Friendly customer routes must be registered before the legacy registry router:
+# the latter contains a broad POST /sources-registry/{source_id}/{action} route.
+# If it comes first, POST .../{id}/settings is swallowed as action="settings".
 app.include_router(source_setup_router)
+app.include_router(source_registry_router)
 app.include_router(system_router)
 app.include_router(network_router)
 app.include_router(onboarding_router)
