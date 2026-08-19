@@ -142,8 +142,12 @@ def _promokood_category_proposal(url: str, soup: BeautifulSoup, collector: Gener
     host = (parsed.hostname or "").casefold().removeprefix("www.")
     if host != "promokood.ru" or parsed.path.casefold().startswith("/o/"):
         return None
-    detail_pairs = [(href, node) for href, node in _same_host_detail_links(soup, url) if "/o/" in urlparse(href).path.casefold()]
-    detail_urls = list(dict.fromkeys(href for href, _ in detail_pairs))
+    detail_urls = [
+        href
+        for href, _ in _same_host_detail_links(soup, url)
+        if urlparse(href).path.casefold().startswith("/o/")
+    ]
+    detail_urls = list(dict.fromkeys(detail_urls))
     if not detail_urls:
         return None
     previews: list[AutoPreviewItem] = []
@@ -153,12 +157,6 @@ def _promokood_category_proposal(url: str, soup: BeautifulSoup, collector: Gener
                 previews.append(_preview(item))
         except Exception:
             continue
-    first_link = detail_pairs[0][1]
-    card = first_link.find_parent(["article", "li"])
-    if card is None:
-        card = first_link.find_parent("div")
-    listing_selector = _selector(card) if isinstance(card, Tag) else None
-    detail_selector = _relative_selector(card, first_link) if isinstance(card, Tag) else _selector(first_link)
     confidence = 0.99 if previews else 0.90
     return AssistedSourceProposal(
         url=url,
@@ -167,11 +165,13 @@ def _promokood_category_proposal(url: str, soup: BeautifulSoup, collector: Gener
         strategy="preset:promokood-category",
         confidence=confidence,
         explanation=(
-            "Определён каталог Promokood. Парсер сам будет открывать только внутренние страницы /o/ "
-            "и разбирать их встроенным шаблоном; внешние кнопки активации не используются для обхода."
+            "Определён каталог Promokood. Парсер сам найдёт внутренние ссылки /o/, "
+            "откроет их и разберёт встроенным шаблоном. Внешние кнопки «Активировать» для обхода игнорируются."
         ),
-        listing_item_selector=listing_selector,
-        detail_link_selector=detail_selector,
+        # Known-site preset deliberately avoids page-specific card classes.
+        # A global same-host /o/ anchor selector is substantially more stable.
+        listing_item_selector=None,
+        detail_link_selector='a[href*="/o/"]',
         detail_url_contains="/o/",
         sample_detail_url=detail_urls[0],
         previews=tuple(previews[:5]),
@@ -273,6 +273,10 @@ def _infer_direct_profile(url: str, html_text: str) -> tuple[ManualProfile | Non
             continue
         useful = [item for item in preview_items if item.title or item.promo_code or item.conditions]
         if len(useful) < 2:
+            continue
+        # Do not auto-confirm a generic profile that only found headings/links.
+        # At least one benefit-bearing field must be structurally identified.
+        if not (profile.promo_code_selector or profile.conditions_selector):
             continue
         previews = tuple(
             AutoPreviewItem(
