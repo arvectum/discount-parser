@@ -85,7 +85,15 @@ def list_publish_candidates(
         expiry = offer.valid_until or extract_valid_until("\n".join(v for v in (offer.title, offer.description, offer.conditions) if v), now=now)
         if expiry:
             offer.valid_until = expiry
-        if expiry and expiry < now:
+            # SQLite can deserialize DateTime values without tzinfo even when
+            # the application writes UTC-aware timestamps. Normalize the
+            # customer DB value before comparing it with the aware UTC clock.
+            # This restores the guard that was present in the Aug-12 hotfix and
+            # prevents /home from crashing after collection on upgraded DBs.
+            comparable_expiry = expiry if expiry.tzinfo is not None else expiry.replace(tzinfo=UTC)
+        else:
+            comparable_expiry = None
+        if comparable_expiry and comparable_expiry < now:
             offer.status = "expired"
             continue
         result.append(offer)
