@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.modules.source_registry import assisted_setup
+from src.modules.source_registry.known_site_crawl import discover_promokood_detail_urls
 from src.modules.source_registry.service import ItemPayload
 
 
@@ -15,11 +16,28 @@ class FakeResponse:
         self.text = text
 
 
+def test_promokood_detail_discovery_handles_links_buttons_and_embedded_data() -> None:
+    html = """
+    <a href="/o/one">Все промокоды</a>
+    <button data-url="/o/two">Все промокоды</button>
+    <button onclick="location.href='/o/three'">Все акции</button>
+    <script>window.__DATA__={"next":"\\/o\\/four","external":"https://advertiser.example/go"}</script>
+    <a href="https://advertiser.example/activate">Активировать</a>
+    """
+    urls = discover_promokood_detail_urls(html, entry_url="https://promokood.ru/travel")
+    assert urls == [
+        "https://promokood.ru/o/one",
+        "https://promokood.ru/o/two",
+        "https://promokood.ru/o/three",
+        "https://promokood.ru/o/four",
+    ]
+
+
 def test_promokood_category_is_confirm_only_preset(monkeypatch) -> None:
     category_html = """
     <main>
       <article class="merchant-card"><h2>ВсеИнструменты</h2><a class="all-codes" href="/o/vseinstrumenti">Все промокоды</a><a href="https://advertiser.example">Активировать</a></article>
-      <article class="merchant-card"><h2>Островок</h2><a class="all-codes" href="/o/ostrovok">Все промокоды</a></article>
+      <article class="merchant-card"><h2>Островок</h2><button data-url="/o/ostrovok">Все промокоды</button></article>
     </main>
     """
 
@@ -48,6 +66,7 @@ def test_promokood_category_is_confirm_only_preset(monkeypatch) -> None:
     assert proposal.crawl_mode == "follow_internal"
     assert proposal.strategy == "preset:promokood-category"
     assert proposal.detail_url_contains == "/o/"
+    assert proposal.detail_link_selector == 'a[href*="/o/"]'
     assert proposal.discovered_detail_pages == 2
     assert proposal.can_confirm is True
     assert proposal.item_selector is None
@@ -112,6 +131,7 @@ def test_follow_collection_allows_known_detail_adapter_without_css() -> None:
     assert "two-stage source requires a saved detail extraction profile" not in follow
     assert "SimpleNamespace(url=detail_page_url)" in follow
     assert "if not items and source.item_selector" in follow
+    assert "discover_promokood_detail_urls" in follow
 
 
 def test_feedback_12_windows_installer_version() -> None:
