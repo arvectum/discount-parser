@@ -13,6 +13,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from src.modules.source_registry.follow_collection import install_follow_profile_collection
 from src.shared.logging import redact_secrets
 from src.web.app import app
+from src.web.assisted_source_routes import assisted_analysis_page, confirm_assisted_source
 from src.web.brand_v2 import BRAND_STYLE, brand_footer, brand_header
 from src.web.customer_hotfixes import install_customer_hotfixes
 from src.web.management_pages import router as management_router
@@ -58,11 +59,14 @@ def _replace_exact_route(path: str, method: str, endpoint) -> None:
     app.add_api_route(path, endpoint, methods=[target])
 
 
-# DP-CUST-011 v2 supports both direct pages and category -> internal detail
-# pages. Register after all older routers so these exact endpoints are canonical.
+# DP-CUST-011 keeps manual mapping as the specialist fallback.
 _replace_exact_route("/sources-registry/{source_id}/mapping", "GET", mapping_page_v2)
 _replace_exact_route("/sources-registry/{source_id}/mapping/preview", "POST", mapping_preview_v2)
 _replace_exact_route("/sources-registry/{source_id}/mapping/save", "POST", mapping_save_v2)
+# DP-CUST-012 makes automatic proposal + customer confirmation the canonical path.
+# The customer never has to copy selectors during normal onboarding.
+_replace_exact_route("/sources-registry/analyze", "POST", assisted_analysis_page)
+_replace_exact_route("/sources-registry/confirm-auto", "POST", confirm_assisted_source)
 
 install_follow_profile_collection()
 install_customer_hotfixes(app)
@@ -164,12 +168,13 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
         if request.method == 'GET' and request.url.path == '/sources-registry':
             text = text.replace(
                 'Вставьте ссылку. Discount Parser сам определит тип источника, попробует найти предложения и покажет пример до добавления.',
-                'Вставьте ссылку. Для сайта Discount Parser покажет предварительный пример, а после добавления попросит один раз указать, где на странице находятся нужные поля.',
+                'Вставьте ссылку и нажмите «Настроить автоматически». Discount Parser сам выберет способ обхода, определит поля и покажет результат для проверки.',
             )
             text = text.replace(
                 'HTML, CSS, атрибуты и другие технические параметры вводить не нужно.',
-                'Для сайтов нужна одноразовая схема полей. Можно настроить прямую страницу или каталог: карточка → внутренняя кнопка «Все промокоды» → единый шаблон страницы. Внешние кнопки «Активировать» crawler не открывает.',
+                'От вас требуется только проверить несколько найденных строк и подтвердить автоматический выбор. HTML, CSS и selectors вводить не нужно.',
             )
+            text = text.replace('>Проверить источник</button>', '>Настроить автоматически</button>')
         if request.method == 'GET' and request.url.path == '/settings' and 'href="/settings/telegram-format"' not in text:
             marker = '<div class="ux-cards">'
             if marker in text:
