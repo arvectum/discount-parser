@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 from src.modules.source_registry.collectors import CollectorError, GenericWebCollector
 from src.modules.source_registry.dynamic_offer_fields import install_dynamic_offer_fields
 from src.modules.source_registry.follow_profiles import extract_internal_detail_urls, get_follow_profile
+from src.modules.source_registry.known_site_crawl import discover_promokood_detail_urls
 from src.modules.source_registry.service import ItemPayload
 
 
@@ -51,6 +52,26 @@ def _detail_payload(payload: ItemPayload, *, entry_url: str, detail_url: str, me
     return replace(payload, raw_payload=metadata)
 
 
+def _detail_urls_for_entry(source, entry_response, profile) -> list[str]:
+    entry_url = str(entry_response.url)
+    parsed = urlparse(entry_url)
+    host = (parsed.hostname or "").casefold().removeprefix("www.")
+    if host == "promokood.ru" and not parsed.path.casefold().startswith("/o/"):
+        urls = discover_promokood_detail_urls(
+            entry_response.text,
+            entry_url=entry_url,
+            limit=profile.max_detail_pages,
+        )
+        if urls:
+            return urls
+
+    entry_soup = _clean_soup(entry_response.text)
+    try:
+        return extract_internal_detail_urls(entry_soup, entry_url=entry_url, profile=profile)
+    except ValueError as exc:
+        raise CollectorError(str(exc)) from exc
+
+
 def install_follow_profile_collection() -> None:
     if getattr(GenericWebCollector, _PATCH_MARKER, False):
         install_dynamic_offer_fields()
@@ -65,11 +86,7 @@ def install_follow_profile_collection() -> None:
 
         entry_response = self._get(source.url, route=source.network_policy)
         entry_url = str(entry_response.url)
-        entry_soup = _clean_soup(entry_response.text)
-        try:
-            detail_urls = extract_internal_detail_urls(entry_soup, entry_url=entry_url, profile=profile)
-        except ValueError as exc:
-            raise CollectorError(str(exc)) from exc
+        detail_urls = _detail_urls_for_entry(source, entry_response, profile)
         if not detail_urls:
             raise CollectorError(
                 "По автоматической настройке каталога не найдено внутренних страниц предложений. "
@@ -84,8 +101,8 @@ def install_follow_profile_collection() -> None:
             merchant = _merchant_from_detail(detail_soup, profile.merchant_selector, detail_page_url)
 
             # Known-site detection must look at the internal detail URL rather
-            # than the category entry URL. That makes /travel -> /o/... work
-            # without any customer-supplied selectors.
+            # than the category entry URL. This keeps category onboarding fully
+            # automatic even when the site changes button/link markup.
             items = self._known_site_items(SimpleNamespace(url=detail_page_url), detail_page_url, str(detail_soup))
             if not items and source.item_selector:
                 items = self._profile_items(source, detail_soup, detail_page_url)
