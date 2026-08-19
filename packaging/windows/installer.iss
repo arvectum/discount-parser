@@ -1,5 +1,5 @@
 #define MyAppName "Discount Parser"
-#define MyAppVersion "0.1.5"
+#define MyAppVersion "0.1.6"
 #define MyAppExeName "DiscountParser.exe"
 #define MyWorkerExeName "DiscountParserWorker.exe"
 #define MyDesktopShortcutName "Discount Parser.lnk"
@@ -155,13 +155,18 @@ begin
   TargetPath := ExpandConstant('{app}\{#MyAppExeName}');
   ShortcutPath := DesktopShortcutPath();
 
-  RemoveDesktopShortcutBestEffort();
-
+  // DP-CUST-009: on an upgrade Inno Setup can remember that the optional
+  // desktop task was not selected. The previous implementation deleted an
+  // existing shortcut *before* checking that task and then exited, making the
+  // customer's working icon disappear. If the task is not selected, preserve
+  // whatever shortcut the user already has. If it is selected, refresh it.
   if not WizardIsTaskSelected('desktopicon') then
   begin
-    Log('DP-WIN-P0.2: desktop shortcut task not selected');
+    Log('DP-CUST-009: desktop shortcut task not selected; preserving existing shortcut');
     Exit;
   end;
+
+  RemoveDesktopShortcutBestEffort();
 
   if not FileExists(TargetPath) then
   begin
