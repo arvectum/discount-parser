@@ -80,10 +80,6 @@ def test_source_technical_settings_are_explicitly_secondary() -> None:
 
 
 def test_friendly_settings_post_precedes_legacy_generic_action_route() -> None:
-    # Missing required `url` is intentional: if the friendly POST route wins,
-    # FastAPI validation returns 422 before touching the database. If the older
-    # generic action route wins instead, `settings` is treated as an unknown
-    # legacy action and returns a different response.
     test_app = FastAPI()
     test_app.include_router(source_setup_routes.router)
     test_app.include_router(source_registry_routes.router)
@@ -101,4 +97,4 @@ def test_friendly_settings_post_precedes_legacy_generic_action_route() -> None:
 
 def test_feedback_10_windows_installer_version() -> None:
     installer = (ROOT / "packaging" / "windows" / "installer.iss").read_text(encoding="utf-8")
-    assert '#define MyAppVersion "0.1.9"' in installer
+    assert '#define MyAppVersion "0.1.10"' in installer
