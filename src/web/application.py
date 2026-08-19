@@ -137,9 +137,12 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
         if response.headers.get('content-type', '').split(';')[0] != 'text/html':
             return response
 
-        body = b''
-        async for chunk in response.body_iterator:
-            body += chunk
+        if hasattr(response, 'body_iterator'):
+            body = b''
+            async for chunk in response.body_iterator:
+                body += chunk
+        else:
+            body = bytes(getattr(response, 'body', b''))
         text = body.decode('utf-8')
         if request.method == 'GET' and request.url.path == '/settings' and 'href="/settings/telegram-format"' not in text:
             marker = '<div class="ux-cards">'
