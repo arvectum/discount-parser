@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from src.modules.source_registry.collectors import CollectorError, GenericWebCollector
+from src.modules.source_registry.dynamic_offer_fields import install_dynamic_offer_fields
 from src.modules.source_registry.follow_profiles import extract_internal_detail_urls, get_follow_profile
 from src.modules.source_registry.service import ItemPayload
 
@@ -30,8 +31,6 @@ def _merchant_from_detail(soup: BeautifulSoup, selector: str | None, detail_url:
             value = node.get_text(" ", strip=True)
             if value:
                 return value[:255]
-    # Conservative fallback for aggregator detail pages: page heading first,
-    # then the path slug. Explicit selector remains the preferred customer path.
     for candidate in soup.select("h1, h2"):
         value = candidate.get_text(" ", strip=True)
         if value and len(value) <= 255:
@@ -53,6 +52,7 @@ def _detail_payload(payload: ItemPayload, *, entry_url: str, detail_url: str, me
 
 def install_follow_profile_collection() -> None:
     if getattr(GenericWebCollector, _PATCH_MARKER, False):
+        install_dynamic_offer_fields()
         return
 
     original_collect = GenericWebCollector.collect
@@ -94,3 +94,4 @@ def install_follow_profile_collection() -> None:
 
     GenericWebCollector.collect = collect_with_follow
     setattr(GenericWebCollector, _PATCH_MARKER, True)
+    install_dynamic_offer_fields()
