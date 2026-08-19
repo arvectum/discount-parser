@@ -17,6 +17,7 @@ from src.web.brand_v2 import BRAND_STYLE, brand_footer, brand_header
 from src.web.customer_hotfixes import install_customer_hotfixes
 from src.web.management_pages import router as management_router
 from src.web.manual_mapping_routes import router as manual_mapping_router
+from src.web.manual_mapping_v2 import mapping_page_v2, mapping_preview_v2, mapping_save_v2
 from src.web.network_routes import router as network_router
 from src.web.onboarding_routes import router as onboarding_router
 from src.web.processes import process_manager
@@ -34,12 +35,7 @@ logger = logging.getLogger("src.web.application")
 app.include_router(management_router)
 app.include_router(review_router)
 app.include_router(source_registry_static_router)
-# DP-CUST-011: the one-time per-site mapping workflow owns add-auto/settings
-# before the older DP-CUST-010 auto routes and the broad legacy action route.
 app.include_router(manual_mapping_router)
-# Friendly customer routes must be registered before the legacy registry router:
-# the latter contains a broad POST /sources-registry/{source_id}/{action} route.
-# If it comes first, POST .../{id}/settings is swallowed as action="settings".
 app.include_router(source_setup_router)
 app.include_router(source_registry_router)
 app.include_router(system_router)
@@ -48,9 +44,26 @@ app.include_router(onboarding_router)
 app.include_router(telegram_format_router)
 app.include_router(ux_router)
 
-# Customer-facing replacements must be part of the canonical ASGI application,
-# not only the desktop launcher. This keeps upgrade-safe routes active for
-# frozen builds, tests, alternate entrypoints and any direct ASGI import.
+
+def _replace_exact_route(path: str, method: str, endpoint) -> None:
+    target = method.upper()
+    app.router.routes[:] = [
+        route
+        for route in app.router.routes
+        if not (
+            getattr(route, "path", None) == path
+            and target in set(getattr(route, "methods", set()) or set())
+        )
+    ]
+    app.add_api_route(path, endpoint, methods=[target])
+
+
+# DP-CUST-011 v2 supports both direct pages and category -> internal detail
+# pages. Register after all older routers so these exact endpoints are canonical.
+_replace_exact_route("/sources-registry/{source_id}/mapping", "GET", mapping_page_v2)
+_replace_exact_route("/sources-registry/{source_id}/mapping/preview", "POST", mapping_preview_v2)
+_replace_exact_route("/sources-registry/{source_id}/mapping/save", "POST", mapping_save_v2)
+
 install_follow_profile_collection()
 install_customer_hotfixes(app)
 
@@ -155,7 +168,7 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
             )
             text = text.replace(
                 'HTML, CSS, атрибуты и другие технические параметры вводить не нужно.',
-                'Для сайтов нужна одноразовая схема полей. Можно настроить как прямую страницу предложений, так и каталог: «карточка → внутренняя кнопка Все промокоды → единый шаблон страницы». Внешние кнопки активации парсер для обхода не открывает.',
+                'Для сайтов нужна одноразовая схема полей. Можно настроить прямую страницу или каталог: карточка → внутренняя кнопка «Все промокоды» → единый шаблон страницы. Внешние кнопки «Активировать» crawler не открывает.',
             )
         if request.method == 'GET' and request.url.path == '/settings' and 'href="/settings/telegram-format"' not in text:
             marker = '<div class="ux-cards">'
