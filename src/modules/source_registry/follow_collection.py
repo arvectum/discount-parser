@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -19,16 +20,34 @@ def _clean_soup(html_text: str) -> BeautifulSoup:
     return soup
 
 
-def _detail_payload(payload: ItemPayload, *, entry_url: str, detail_url: str) -> ItemPayload:
+def _merchant_from_detail(soup: BeautifulSoup, selector: str | None, detail_url: str) -> str | None:
+    if selector:
+        try:
+            node = soup.select_one(selector)
+        except Exception as exc:
+            raise CollectorError(f"invalid merchant CSS selector: {exc}") from exc
+        if node is not None:
+            value = node.get_text(" ", strip=True)
+            if value:
+                return value[:255]
+    # Conservative fallback for aggregator detail pages: page heading first,
+    # then the path slug. Explicit selector remains the preferred customer path.
+    for candidate in soup.select("h1, h2"):
+        value = candidate.get_text(" ", strip=True)
+        if value and len(value) <= 255:
+            return value
+    slug = urlparse(detail_url).path.rstrip("/").split("/")[-1].strip()
+    return slug[:255] or None
+
+
+def _detail_payload(payload: ItemPayload, *, entry_url: str, detail_url: str, merchant: str | None) -> ItemPayload:
     metadata = dict(payload.raw_payload or {})
     metadata.update({
         "crawl_mode": "follow_internal",
         "entry_url": entry_url,
         "detail_url": detail_url,
+        "merchant": merchant,
     })
-    # Keep the extraction-selected URL (which may intentionally be an outbound
-    # advertiser URL) as the offer URL, but record the internal detail page in
-    # metadata. The crawler itself never follows external activation links.
     return replace(payload, raw_payload=metadata)
 
 
@@ -63,11 +82,12 @@ def install_follow_profile_collection() -> None:
             detail_response = self._get(detail_url, route=source.network_policy)
             detail_page_url = str(detail_response.url)
             detail_soup = _clean_soup(detail_response.text)
+            merchant = _merchant_from_detail(detail_soup, profile.merchant_selector, detail_page_url)
             items = self._profile_items(source, detail_soup, detail_page_url)
             if not items:
                 items = self._known_site_items(source, detail_page_url, str(detail_soup))
             for item in items:
-                result.append(_detail_payload(item, entry_url=entry_url, detail_url=detail_page_url))
+                result.append(_detail_payload(item, entry_url=entry_url, detail_url=detail_page_url, merchant=merchant))
                 if len(result) >= self.policy.max_items:
                     return result
         return result
