@@ -13,7 +13,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from src.shared.logging import redact_secrets
 from src.web.app import app
 from src.web.brand_v2 import BRAND_STYLE, brand_footer, brand_header
-from src.web.customer_hotfixes import install_customer_hotfixes
+from src.web.customer_hotfixes import install_customer_hotfixes, sources_registry_hotfix
 from src.web.management_pages import router as management_router
 from src.web.network_routes import router as network_router
 from src.web.onboarding_routes import router as onboarding_router
@@ -76,7 +76,18 @@ class LocalControlMiddleware(BaseHTTPMiddleware):
                 return PlainTextResponse('Cross-origin request blocked', status_code=403)
 
         try:
-            response = await call_next(request)
+            # DP-CUST-007: customer evidence from the 0.1.3 frozen build proved
+            # that the legacy Sources endpoint could still be selected at
+            # runtime even though route introspection showed the replacement.
+            # Guard the exact GET path before Starlette router dispatch so the
+            # safe wrapper is guaranteed to execute in every entrypoint/build.
+            if request.method == 'GET' and request.url.path == '/sources-registry':
+                response = sources_registry_hotfix(
+                    message=request.query_params.get('message'),
+                    error=request.query_params.get('error'),
+                )
+            else:
+                response = await call_next(request)
         except Exception:
             tb = traceback.format_exc()
             clean_tb = redact_secrets(tb)
