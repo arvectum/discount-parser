@@ -24,6 +24,7 @@ def upgrade() -> None:
         sa.Column("listing_item_selector", sa.Text(), nullable=True),
         sa.Column("detail_link_selector", sa.Text(), nullable=True),
         sa.Column("detail_url_contains", sa.Text(), nullable=True),
+        sa.Column("merchant_selector", sa.Text(), nullable=True),
         sa.Column("max_detail_pages", sa.Integer(), nullable=False, server_default="100"),
         sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
