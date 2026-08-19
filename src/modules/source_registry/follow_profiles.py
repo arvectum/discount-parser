@@ -15,6 +15,7 @@ class FollowProfile:
     listing_item_selector: str | None = None
     detail_link_selector: str | None = None
     detail_url_contains: str | None = None
+    merchant_selector: str | None = None
     max_detail_pages: int = 100
 
 
@@ -25,7 +26,7 @@ def get_follow_profile(source_id: int | None) -> FollowProfile:
         with create_session() as session:
             row = session.execute(
                 text(
-                    "SELECT crawl_mode, listing_item_selector, detail_link_selector, detail_url_contains, max_detail_pages "
+                    "SELECT crawl_mode, listing_item_selector, detail_link_selector, detail_url_contains, merchant_selector, max_detail_pages "
                     "FROM source_follow_profiles WHERE registered_source_id = :source_id"
                 ),
                 {"source_id": int(source_id)},
@@ -42,6 +43,7 @@ def get_follow_profile(source_id: int | None) -> FollowProfile:
         listing_item_selector=str(row.get("listing_item_selector") or "").strip() or None,
         detail_link_selector=str(row.get("detail_link_selector") or "").strip() or None,
         detail_url_contains=str(row.get("detail_url_contains") or "").strip() or None,
+        merchant_selector=str(row.get("merchant_selector") or "").strip() or None,
         max_detail_pages=max(1, min(int(row.get("max_detail_pages") or 100), 500)),
     )
 
@@ -53,6 +55,7 @@ def set_follow_profile(
     listing_item_selector: str | None = None,
     detail_link_selector: str | None = None,
     detail_url_contains: str | None = None,
+    merchant_selector: str | None = None,
     max_detail_pages: int = 100,
 ) -> None:
     mode = (crawl_mode or "direct").strip()
@@ -62,6 +65,7 @@ def set_follow_profile(
     normalized_listing = generalize_container_selector(sample_listing) if sample_listing else None
     normalized_link = relative_field_selector(sample_listing, detail_link_selector) if sample_listing else (detail_link_selector or "").strip() or None
     contains = (detail_url_contains or "").strip() or None
+    merchant = (merchant_selector or "").strip() or None
     limit = max(1, min(int(max_detail_pages or 100), 500))
     if mode == "follow_internal" and not normalized_link:
         raise ValueError("Для перехода по внутренним страницам нужен selector кнопки/ссылки.")
@@ -77,13 +81,14 @@ def set_follow_profile(
             "listing": normalized_listing,
             "link": normalized_link,
             "contains": contains,
+            "merchant": merchant,
             "limit": limit,
         }
         if exists:
             session.execute(
                 text(
                     "UPDATE source_follow_profiles SET crawl_mode=:mode, listing_item_selector=:listing, "
-                    "detail_link_selector=:link, detail_url_contains=:contains, max_detail_pages=:limit, "
+                    "detail_link_selector=:link, detail_url_contains=:contains, merchant_selector=:merchant, max_detail_pages=:limit, "
                     "updated_at=CURRENT_TIMESTAMP WHERE registered_source_id=:source_id"
                 ),
                 params,
@@ -92,8 +97,8 @@ def set_follow_profile(
             session.execute(
                 text(
                     "INSERT INTO source_follow_profiles "
-                    "(registered_source_id, crawl_mode, listing_item_selector, detail_link_selector, detail_url_contains, max_detail_pages, created_at, updated_at) "
-                    "VALUES (:source_id, :mode, :listing, :link, :contains, :limit, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                    "(registered_source_id, crawl_mode, listing_item_selector, detail_link_selector, detail_url_contains, merchant_selector, max_detail_pages, created_at, updated_at) "
+                    "VALUES (:source_id, :mode, :listing, :link, :contains, :merchant, :limit, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
                 ),
                 params,
             )
@@ -144,7 +149,6 @@ def extract_internal_detail_urls(
         parsed = urlparse(absolute)
         host = (parsed.hostname or "").casefold().removeprefix("www.")
         if parsed.scheme not in {"http", "https"} or host != entry_host:
-            # Never crawl an activation/advertiser redirect off the configured site.
             continue
         if profile.detail_url_contains and profile.detail_url_contains not in absolute:
             continue
