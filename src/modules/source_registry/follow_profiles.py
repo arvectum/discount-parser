@@ -5,7 +5,6 @@ from urllib.parse import urljoin, urlparse
 
 from sqlalchemy import text
 
-from src.modules.source_registry.collectors import CollectorError
 from src.modules.source_registry.manual_profile import generalize_container_selector, relative_field_selector
 from src.shared.db import create_session, session_scope
 
@@ -109,31 +108,31 @@ def extract_internal_detail_urls(
     if profile.crawl_mode != "follow_internal":
         return []
     if not profile.detail_link_selector:
-        raise CollectorError("two-stage source requires detail_link_selector")
+        raise ValueError("two-stage source requires detail_link_selector")
 
     entry = urlparse(entry_url)
     entry_host = (entry.hostname or "").casefold().removeprefix("www.")
     if not entry_host:
-        raise CollectorError("entry URL has no hostname")
+        raise ValueError("entry URL has no hostname")
 
     if profile.listing_item_selector:
         try:
             containers = soup.select(profile.listing_item_selector)
         except Exception as exc:
-            raise CollectorError(f"invalid listing CSS selector: {exc}") from exc
+            raise ValueError(f"invalid listing CSS selector: {exc}") from exc
         candidates = []
         for container in containers:
             try:
                 target = container if profile.detail_link_selector == ":scope" else container.select_one(profile.detail_link_selector)
             except Exception as exc:
-                raise CollectorError(f"invalid detail-link CSS selector: {exc}") from exc
+                raise ValueError(f"invalid detail-link CSS selector: {exc}") from exc
             if target is not None:
                 candidates.append(target)
     else:
         try:
             candidates = soup.select(profile.detail_link_selector)
         except Exception as exc:
-            raise CollectorError(f"invalid detail-link CSS selector: {exc}") from exc
+            raise ValueError(f"invalid detail-link CSS selector: {exc}") from exc
 
     result: list[str] = []
     seen: set[str] = set()
