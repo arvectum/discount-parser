@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from src.modules.source_registry import auto_setup
 from src.modules.source_registry.service import ItemPayload
-from src.web import source_setup_routes
+from src.web import source_registry_routes, source_setup_routes
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,6 +79,26 @@ def test_source_technical_settings_are_explicitly_secondary() -> None:
     assert "CSS-селекторы, collector" in source
 
 
+def test_friendly_settings_post_precedes_legacy_generic_action_route() -> None:
+    # Missing required `url` is intentional: if the friendly POST route wins,
+    # FastAPI validation returns 422 before touching the database. If the older
+    # generic action route wins instead, `settings` is treated as an unknown
+    # legacy action and returns a different response.
+    test_app = FastAPI()
+    test_app.include_router(source_setup_routes.router)
+    test_app.include_router(source_registry_routes.router)
+
+    with TestClient(test_app) as client:
+        response = client.post("/sources-registry/123/settings", data={})
+
+    assert response.status_code == 422
+
+    application_source = (ROOT / "src" / "web" / "application.py").read_text(encoding="utf-8")
+    assert application_source.index("app.include_router(source_setup_router)") < application_source.index(
+        "app.include_router(source_registry_router)"
+    )
+
+
 def test_feedback_10_windows_installer_version() -> None:
     installer = (ROOT / "packaging" / "windows" / "installer.iss").read_text(encoding="utf-8")
-    assert '#define MyAppVersion "0.1.7"' in installer
+    assert '#define MyAppVersion "0.1.8"' in installer
