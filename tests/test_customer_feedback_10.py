@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from fastapi import FastAPI
+
 from src.modules.source_registry import auto_setup
 from src.modules.source_registry.service import ItemPayload
-from src.web import source_setup_routes
+from src.web import source_registry_routes, source_setup_routes
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,9 +79,15 @@ def test_source_technical_settings_are_explicitly_secondary() -> None:
 
 
 def test_friendly_settings_post_precedes_legacy_generic_action_route() -> None:
-    from src.web import application
+    # Use a fresh app because several historical hotfix tests intentionally
+    # mutate the shared canonical router in-process. This regression verifies
+    # the order used by application.py without depending on pytest collection
+    # order or another test's route replacement side effects.
+    test_app = FastAPI()
+    test_app.include_router(source_setup_routes.router)
+    test_app.include_router(source_registry_routes.router)
 
-    routes = list(application.app.router.routes)
+    routes = list(test_app.router.routes)
     friendly_index = next(
         index
         for index, route in enumerate(routes)
@@ -94,6 +102,11 @@ def test_friendly_settings_post_precedes_legacy_generic_action_route() -> None:
     )
 
     assert friendly_index < generic_index
+
+    application_source = (ROOT / "src" / "web" / "application.py").read_text(encoding="utf-8")
+    assert application_source.index("app.include_router(source_setup_router)") < application_source.index(
+        "app.include_router(source_registry_router)"
+    )
 
 
 def test_feedback_10_windows_installer_version() -> None:
