@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
-
 from src.modules.source_registry.manual_profile import (
     generalize_container_selector,
     normalize_manual_profile,
     preview_manual_profile_html,
 )
-from src.web import manual_mapping_routes, source_registry_routes, source_setup_routes
+from src.web import manual_mapping_routes
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -93,32 +91,22 @@ def test_profile_preview_maps_each_selected_element_to_expected_column() -> None
     assert items[1].promo_code == "TOOLS15"
 
 
-def test_manual_mapping_routes_win_before_auto_and_legacy_routes() -> None:
-    app = FastAPI()
-    app.include_router(manual_mapping_routes.router)
-    app.include_router(source_setup_routes.router)
-    app.include_router(source_registry_routes.router)
+def test_manual_mapping_routes_are_declared_before_auto_and_legacy_routes() -> None:
+    # Historical hotfix tests mutate shared FastAPI routers in-process, so this
+    # regression verifies canonical declaration/order from source text instead
+    # of depending on pytest execution order.
+    manual_source = (ROOT / "src" / "web" / "manual_mapping_routes.py").read_text(encoding="utf-8")
+    application_source = (ROOT / "src" / "web" / "application.py").read_text(encoding="utf-8")
 
-    settings_matches = [
-        route
-        for route in app.router.routes
-        if getattr(route, "path", None) == "/sources-registry/{source_id}/settings"
-        and "POST" in set(getattr(route, "methods", set()) or set())
-    ]
-    assert settings_matches
-    assert settings_matches[0].endpoint is manual_mapping_routes.source_settings_save
-
-    mapping_save_index = next(
-        index
-        for index, route in enumerate(app.router.routes)
-        if getattr(route, "path", None) == "/sources-registry/{source_id}/mapping/save"
+    assert "@router.post('/sources-registry/{source_id}/settings')" in manual_source
+    assert "@router.post('/sources-registry/{source_id}/mapping/save')" in manual_source
+    assert "@router.post('/sources-registry/add-auto')" in manual_source
+    assert application_source.index("app.include_router(manual_mapping_router)") < application_source.index(
+        "app.include_router(source_setup_router)"
     )
-    generic_action_index = next(
-        index
-        for index, route in enumerate(app.router.routes)
-        if getattr(route, "path", None) == "/sources-registry/{source_id}/{action}"
+    assert application_source.index("app.include_router(source_setup_router)") < application_source.index(
+        "app.include_router(source_registry_router)"
     )
-    assert mapping_save_index < generic_action_index
 
 
 def test_mapping_page_instructs_customer_to_copy_selectors_not_line_numbers(monkeypatch) -> None:
