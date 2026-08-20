@@ -136,4 +136,4 @@ def test_follow_collection_allows_known_detail_adapter_without_css() -> None:
 
 def test_feedback_12_windows_installer_version() -> None:
     installer = (ROOT / "packaging" / "windows" / "installer.iss").read_text(encoding="utf-8")
-    assert '#define MyAppVersion "0.1.10"' in installer
+    assert '#define MyAppVersion "0.1.11"' in installer

@@ -189,4 +189,4 @@ def test_v2_mapping_copy_explains_catalog_and_external_activation_rules() -> Non
 
 def test_feedback_11_windows_installer_version() -> None:
     installer = (ROOT / "packaging" / "windows" / "installer.iss").read_text(encoding="utf-8")
-    assert '#define MyAppVersion "0.1.10"' in installer
+    assert '#define MyAppVersion "0.1.11"' in installer
