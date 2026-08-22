@@ -31,7 +31,7 @@ def test_system_route_prefers_windows_browser_proxy(monkeypatch) -> None:
     monkeypatch.setattr(network, "windows_system_proxy_url", lambda url: "http://127.0.0.1:7890")
     monkeypatch.setattr(network.httpx, "Client", FakeClient)
 
-    network.NetworkRouter()._client(
+    network.NetworkRouter()._client_for_url(
         "system",
         url="https://promokood.ru/travel",
         timeout=4.0,
