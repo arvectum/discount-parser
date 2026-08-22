@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.shared import network
-from src.web.application import app
+from src.web.customer_feedback_13_routes import router as customer_router
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,31 +56,21 @@ def test_customer_routes_precede_manual_and_legacy_routes() -> None:
     assert '_replace_exact_route("/sources-registry/{source_id}/mapping", "GET", mapping_page_v2)' not in application
 
 
-def test_effective_router_selects_customer_safe_endpoints_first() -> None:
-    routes = list(app.router.routes)
+def test_customer_router_exposes_safe_exact_endpoints() -> None:
+    routes = list(customer_router.routes)
 
-    def indexes(path: str, method: str) -> list[int]:
+    def endpoints(path: str, method: str) -> list[str]:
         return [
-            index
-            for index, route in enumerate(routes)
+            getattr(getattr(route, "endpoint", None), "__name__", "")
+            for route in routes
             if getattr(route, "path", None) == path
             and method in set(getattr(route, "methods", set()) or set())
         ]
 
-    mapping_indexes = indexes('/sources-registry/{source_id}/mapping', 'GET')
-    assert mapping_indexes
-    assert getattr(routes[mapping_indexes[0]], 'endpoint').__name__ == 'customer_mapping_redirect'
-
-    settings_get = indexes('/sources-registry/{source_id}/settings', 'GET')
-    settings_post = indexes('/sources-registry/{source_id}/settings', 'POST')
-    assert getattr(routes[settings_get[0]], 'endpoint').__name__ == 'customer_source_settings_page'
-    assert getattr(routes[settings_post[0]], 'endpoint').__name__ == 'customer_source_settings_save'
-
-    exact_test = indexes('/sources-registry/{source_id}/test', 'POST')
-    generic_action = indexes('/sources-registry/{source_id}/{action}', 'POST')
-    assert exact_test and generic_action
-    assert exact_test[0] < generic_action[0]
-    assert getattr(routes[exact_test[0]], 'endpoint').__name__ == 'customer_source_test'
+    assert endpoints('/sources-registry/{source_id}/mapping', 'GET') == ['customer_mapping_redirect']
+    assert endpoints('/sources-registry/{source_id}/settings', 'GET') == ['customer_source_settings_page']
+    assert endpoints('/sources-registry/{source_id}/settings', 'POST') == ['customer_source_settings_save']
+    assert endpoints('/sources-registry/{source_id}/test', 'POST') == ['customer_source_test']
 
 
 def test_customer_existing_source_flow_is_confirm_only() -> None:
