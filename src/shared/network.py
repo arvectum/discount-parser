@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import time
 from dataclasses import dataclass
 from threading import RLock
@@ -67,12 +68,87 @@ def configured_proxy_url() -> str | None:
     return urlunsplit((parts.scheme, f"{auth}@{host}{port}", parts.path, parts.query, parts.fragment))
 
 
+def _proxy_url_from_windows_value(proxy_server: str | None, target_url: str) -> str | None:
+    """Convert the WinINet ProxyServer value into an httpx proxy URL.
+
+    Windows stores either one endpoint (``127.0.0.1:7890``) or a semicolon
+    separated map (``http=...;https=...;socks=...``). Chromium/Edge and many
+    desktop VPN clients use this setting, while httpx's ``trust_env=True`` does
+    not read it. Keeping this conversion in our network layer lets the packaged
+    app use the same static system proxy as the customer's browser.
+    """
+    raw = str(proxy_server or "").strip()
+    if not raw:
+        return None
+
+    target_scheme = (urlparse(target_url).scheme or "https").casefold()
+    selected = raw
+    selected_kind = target_scheme
+    if "=" in raw:
+        mapping: dict[str, str] = {}
+        for chunk in raw.split(";"):
+            if "=" not in chunk:
+                continue
+            kind, value = chunk.split("=", 1)
+            kind = kind.strip().casefold()
+            value = value.strip()
+            if kind and value:
+                mapping[kind] = value
+        if not mapping:
+            return None
+        if target_scheme == "https":
+            order = ("https", "http", "socks", "socks5")
+        else:
+            order = (target_scheme, "http", "https", "socks", "socks5")
+        selected_kind = ""
+        selected = ""
+        for kind in order:
+            if mapping.get(kind):
+                selected_kind = kind
+                selected = mapping[kind]
+                break
+        if not selected:
+            return None
+
+    if "://" in selected:
+        return selected
+    prefix = "socks5://" if selected_kind.startswith("socks") else "http://"
+    return prefix + selected
+
+
+def windows_system_proxy_url(target_url: str) -> str | None:
+    """Return the current user's enabled static Windows/WinINet proxy.
+
+    This intentionally has no effect outside Windows and does not attempt to
+    execute PAC/WPAD scripts. A static proxy is the important missing case for
+    the frozen Windows customer build: the browser can work through WinINet
+    while raw httpx requests otherwise fail with ConnectError/ProxyError.
+    """
+    if os.name != "nt":
+        return None
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+        ) as key:
+            enabled = int(winreg.QueryValueEx(key, "ProxyEnable")[0] or 0)
+            if not enabled:
+                return None
+            proxy_server = str(winreg.QueryValueEx(key, "ProxyServer")[0] or "").strip()
+    except (OSError, ValueError, TypeError):
+        return None
+    return _proxy_url_from_windows_value(proxy_server, target_url)
+
+
 class NetworkRouter:
     """Application-owned HTTP routing with a hard loopback bypass.
 
     direct: ignore HTTP(S)_PROXY/ALL_PROXY environment variables.
     proxy: use DP_PROXY_URL explicitly.
-    system: let httpx honor environment proxy variables / OS routing.
+    system: on Windows prefer the enabled WinINet system proxy used by browsers;
+            otherwise let httpx honor environment proxy variables / OS routing.
     auto: try the cached/sensible routes and remember a working route briefly.
 
     A TUN-only VPN still controls the OS route table. True per-domain split routing
@@ -90,12 +166,17 @@ class NetworkRouter:
     def _host_key(self, url: str) -> str:
         return (urlparse(url).hostname or url).lower()
 
-    def _client(self, route: str, *, timeout: float, headers: dict[str, str] | None = None) -> httpx.Client:
+    def _client(self, route: str, *, url: str, timeout: float, headers: dict[str, str] | None = None) -> httpx.Client:
         kwargs: dict[str, object] = {"timeout": timeout, "follow_redirects": True, "headers": headers}
         if route == "direct":
             kwargs["trust_env"] = False
         elif route == "system":
-            kwargs["trust_env"] = True
+            system_proxy = windows_system_proxy_url(url)
+            if system_proxy:
+                kwargs["trust_env"] = False
+                kwargs["proxy"] = system_proxy
+            else:
+                kwargs["trust_env"] = True
         elif route == "proxy":
             proxy_url = configured_proxy_url()
             if not proxy_url:
@@ -139,7 +220,7 @@ class NetworkRouter:
         for candidate in self._candidate_routes(url, route):
             started = time.monotonic()
             try:
-                with self._client(candidate, timeout=timeout, headers=headers) as client:
+                with self._client(candidate, url=url, timeout=timeout, headers=headers) as client:
                     response = client.request(method, url, **kwargs)
                 if response.status_code in retry_statuses:
                     errors.append(f"{candidate}: HTTP {response.status_code}")
