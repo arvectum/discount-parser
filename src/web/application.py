@@ -13,8 +13,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from src.modules.source_registry.follow_collection import install_follow_profile_collection
 from src.shared.logging import redact_secrets
 from src.web.app import app
-from src.web.assisted_source_routes import assisted_analysis_page, confirm_assisted_source
 from src.web.brand_v2 import BRAND_STYLE, brand_footer, brand_header
+from src.web.customer_feedback_13_routes import router as customer_feedback_13_router
 from src.web.customer_hotfixes import install_customer_hotfixes
 from src.web.management_pages import router as management_router
 from src.web.manual_mapping_routes import router as manual_mapping_router
@@ -36,6 +36,9 @@ logger = logging.getLogger("src.web.application")
 app.include_router(management_router)
 app.include_router(review_router)
 app.include_router(source_registry_static_router)
+# DP-CUST-013 exact customer routes must precede both manual-mapping and the
+# legacy broad /sources-registry/{source_id}/{action} route.
+app.include_router(customer_feedback_13_router)
 app.include_router(manual_mapping_router)
 app.include_router(source_setup_router)
 app.include_router(source_registry_router)
@@ -59,14 +62,12 @@ def _replace_exact_route(path: str, method: str, endpoint) -> None:
     app.add_api_route(path, endpoint, methods=[target])
 
 
-# DP-CUST-011 keeps manual mapping as the specialist fallback.
-_replace_exact_route("/sources-registry/{source_id}/mapping", "GET", mapping_page_v2)
+# DP-CUST-011 manual selector mapping remains available only as a developer
+# fallback. The customer GET path is intercepted by customer_feedback_13_router
+# and redirects to automatic re-analysis instead of showing CSS fields.
 _replace_exact_route("/sources-registry/{source_id}/mapping/preview", "POST", mapping_preview_v2)
 _replace_exact_route("/sources-registry/{source_id}/mapping/save", "POST", mapping_save_v2)
-# DP-CUST-012 makes automatic proposal + customer confirmation the canonical path.
-# The customer never has to copy selectors during normal onboarding.
-_replace_exact_route("/sources-registry/analyze", "POST", assisted_analysis_page)
-_replace_exact_route("/sources-registry/confirm-auto", "POST", confirm_assisted_source)
+app.add_api_route("/developer/sources-registry/{source_id}/mapping", mapping_page_v2, methods=["GET"])
 
 install_follow_profile_collection()
 install_customer_hotfixes(app)

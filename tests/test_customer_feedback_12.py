@@ -120,8 +120,12 @@ def test_generic_repeated_cards_get_automatic_structural_profile(monkeypatch) ->
 
 def test_customer_facing_application_uses_confirm_only_auto_routes() -> None:
     application = (ROOT / "src" / "web" / "application.py").read_text(encoding="utf-8")
-    assert '_replace_exact_route("/sources-registry/analyze", "POST", assisted_analysis_page)' in application
-    assert '_replace_exact_route("/sources-registry/confirm-auto", "POST", confirm_assisted_source)' in application
+    routes = (ROOT / "src" / "web" / "customer_feedback_13_routes.py").read_text(encoding="utf-8")
+    assert "app.include_router(customer_feedback_13_router)" in application
+    assert "'/sources-registry/analyze'" in routes
+    assert "customer_source_analysis_page" in routes
+    assert "'/sources-registry/confirm-auto'" in routes
+    assert "customer_confirm_assisted_source" in routes
     assert "Настроить автоматически" in application
     assert "проверить несколько найденных строк и подтвердить" in application
 
