@@ -166,17 +166,13 @@ class NetworkRouter:
     def _host_key(self, url: str) -> str:
         return (urlparse(url).hostname or url).lower()
 
-    def _client(self, route: str, *, url: str, timeout: float, headers: dict[str, str] | None = None) -> httpx.Client:
+    def _client(self, route: str, *, timeout: float, headers: dict[str, str] | None = None) -> httpx.Client:
+        """Build a route client while preserving the historical test/extension contract."""
         kwargs: dict[str, object] = {"timeout": timeout, "follow_redirects": True, "headers": headers}
         if route == "direct":
             kwargs["trust_env"] = False
         elif route == "system":
-            system_proxy = windows_system_proxy_url(url)
-            if system_proxy:
-                kwargs["trust_env"] = False
-                kwargs["proxy"] = system_proxy
-            else:
-                kwargs["trust_env"] = True
+            kwargs["trust_env"] = True
         elif route == "proxy":
             proxy_url = configured_proxy_url()
             if not proxy_url:
@@ -186,6 +182,19 @@ class NetworkRouter:
         else:
             raise NetworkRouteError(f"unsupported route: {route}")
         return httpx.Client(**kwargs)
+
+    def _client_for_url(self, route: str, *, url: str, timeout: float, headers: dict[str, str] | None = None) -> httpx.Client:
+        if route == "system":
+            system_proxy = windows_system_proxy_url(url)
+            if system_proxy:
+                return httpx.Client(
+                    timeout=timeout,
+                    follow_redirects=True,
+                    headers=headers,
+                    trust_env=False,
+                    proxy=system_proxy,
+                )
+        return self._client(route, timeout=timeout, headers=headers)
 
     def _candidate_routes(self, url: str, requested: str | None = None) -> list[str]:
         if is_loopback_url(url):
@@ -220,7 +229,7 @@ class NetworkRouter:
         for candidate in self._candidate_routes(url, route):
             started = time.monotonic()
             try:
-                with self._client(candidate, url=url, timeout=timeout, headers=headers) as client:
+                with self._client_for_url(candidate, url=url, timeout=timeout, headers=headers) as client:
                     response = client.request(method, url, **kwargs)
                 if response.status_code in retry_statuses:
                     errors.append(f"{candidate}: HTTP {response.status_code}")
