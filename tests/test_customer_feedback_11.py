@@ -134,13 +134,16 @@ def test_manual_mapping_routes_are_declared_before_auto_and_legacy_routes() -> N
     assert "@router.post('/sources-registry/{source_id}/settings')" in manual_source
     assert "@router.post('/sources-registry/{source_id}/mapping/save')" in manual_source
     assert "@router.post('/sources-registry/add-auto')" in manual_source
+    assert application_source.index("app.include_router(customer_feedback_13_router)") < application_source.index(
+        "app.include_router(manual_mapping_router)"
+    )
     assert application_source.index("app.include_router(manual_mapping_router)") < application_source.index(
         "app.include_router(source_setup_router)"
     )
     assert application_source.index("app.include_router(source_setup_router)") < application_source.index(
         "app.include_router(source_registry_router)"
     )
-    assert '_replace_exact_route("/sources-registry/{source_id}/mapping"' in application_source
+    assert 'app.add_api_route("/developer/sources-registry/{source_id}/mapping", mapping_page_v2' in application_source
     assert "install_follow_profile_collection()" in application_source
 
 
